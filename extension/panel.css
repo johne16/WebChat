@@ -1,0 +1,143 @@
+/* extension/panel.css */
+:root {
+    --bg: #0f1115;
+    --fg: #e8e8e8;
+    --mut: #9aa;
+    --chip: #1b1f2a;
+    --user: #134e4a;
+    --bot: #1e293b;
+    --acc: #3a7bfd;
+    --icon-color: #fff;
+}
+
+@media (prefers-color-scheme: light) {
+    :root {
+        --bg: #fff;
+        --fg: #111;
+        --mut: #555;
+        --chip: #f3f4f6;
+        --user: #dcfce7;
+        --bot: #eef2ff;
+        --acc: #2457f5;
+        --icon-color: #222;
+    }
+}
+
+* {
+    box-sizing: border-box
+}
+
+html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 13px/1.4 system-ui
+}
+
+.hdr {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    border-bottom: 1px solid #2a2d36
+}
+
+#close {
+    all: unset;
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 6px
+}
+
+#close:focus, .inp:focus, .btn:focus {
+    outline: 2px solid var(--acc);
+    outline-offset: 2px
+}
+
+.log {
+    height: calc(100vh - 96px);
+    overflow: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px
+}
+
+.row {
+    display: flex
+}
+
+.row.user {
+    justify-content: flex-end
+}
+
+.row.bot {
+    justify-content: flex-start
+}
+
+.msg {
+    max-width: 80%;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: var(--chip);
+    white-space: pre-wrap
+}
+
+.msg.user {
+    background: var(--user)
+}
+
+.msg.bot {
+    background: var(--bot)
+}
+
+.ftr {
+    position: sticky;
+    bottom: 0;
+    border-top: 1px solid #2a2d36;
+    background: var(--bg)
+}
+
+.bar {
+    display: flex;
+    gap: 8px;
+    padding: 10px
+}
+
+.inp {
+    flex: 1;
+    padding: 8px 10px;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    background: transparent;
+    color: inherit
+}
+
+.btn {
+    all: unset;
+    background: var(--acc);
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600
+}
+
+.icon-btn {
+    background: none;
+    border: 0;
+    padding: 0;
+    margin: 0 6px 0 0;
+    color: var(--icon-color);
+    cursor: pointer;
+    line-height: 1
+}
+
+.icon-btn:focus {
+    outline: 2px solid currentColor;
+    outline-offset: 2px
+}
+
+
+
+

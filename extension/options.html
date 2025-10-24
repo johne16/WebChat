@@ -1,0 +1,47 @@
+<!-- extension/options.html -->
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8"/>
+	<meta name="color-scheme" content="dark light">
+	<title>WebChat Settings</title>
+	<link rel="stylesheet" href="options.css"/>
+</head>
+<body>
+<header><h1>WebChat Settings</h1></header>
+
+<main>
+	<!-- Chat Mode -->
+	<section aria-labelledby="chat-mode">
+		<h2 id="chat-mode">Chat Mode</h2>
+
+		<div class="switch-row">
+			<span id="ai-mode" class="mode-label">AI Mode</span>
+
+			<!-- Sliding switch: left/right, color constant -->
+			<button id="modeSwitch" class="switch" role="switch" aria-checked="false"
+					aria-labelledby="ai-mode testing-mode">
+				<span class="track" aria-hidden="true"></span>
+				<span class="thumb" aria-hidden="true"></span>
+			</button>
+
+			<span id="testing-mode" class="mode-label">Testing Mode</span>
+		</div>
+	</section>
+
+	<!-- LLM Models -->
+	<section aria-labelledby="llm-models">
+		<h2 id="llm-models">LLM Models</h2>
+		<form id="modelForm" class="models" role="radiogroup" aria-labelledby="llm-models">
+			<label class="model"><input type="radio" name="model" value="gpt-4.1-mini" checked/><span>gpt-4.1-mini</span></label>
+			<label class="model"><input type="radio" name="model" value="gpt-4.1"/><span>gpt-4.1</span></label>
+			<label class="model"><input type="radio" name="model" value="gpt-5-nano"/><span>gpt-5-nano</span></label>
+			<label class="model"><input type="radio" name="model"
+										value="gpt-5-mini"/><span>gpt-5-mini</span></label>
+		</form>
+	</section>
+</main>
+
+<script type="module" src="options.js"></script>
+</body>
+</html>
