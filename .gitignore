@@ -1,0 +1,12 @@
+# .gitignore
+
+# Environment variables
+.env
+/server/.env
+
+# Node dependencies
+node_modules/
+/server/node_modules/
+
+# JetBrains IDE settings
+.idea/
