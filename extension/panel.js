@@ -1,5 +1,4 @@
 // extension/panel.js
-import {extractUserVisibleHTML} from "./extraction.js";
 import {sendToBot} from "./llmClient.js";
 
 const log = document.getElementById('log');
@@ -7,6 +6,7 @@ const form = document.getElementById('form');
 const input = document.getElementById('prompt');
 const closeBtn = document.getElementById('close');
 const optionsBtn = document.getElementById('open-options');
+
 let {isTestingMode = false, modelType = ''} =
 	await chrome.storage.local.get(['isTestingMode', 'modelType']);
 
@@ -28,36 +28,6 @@ window.addEventListener("unload", () => {
     });
 });
 
-// extract and parse html from the page
-async function getCleanHTML() {
-    return new Promise(resolve => {
-        chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-            if (!tab?.id) return resolve("");
-            const tabId = tab.id;
-            chrome.scripting.executeScript(
-                { target: { tabId }, files: ["contentScript.js"] },
-                () => {
-                    if (chrome.runtime.lastError) {
-                        console.log("Injection error:", chrome.runtime.lastError.message);
-                        return resolve("");
-                    }
-                    console.log("Sending extraction request to tab:", tabId, tab.url);
-                    chrome.tabs.sendMessage(tabId, { type: "GET_RAW_HTML" }, res => {
-                        if (chrome.runtime.lastError) {
-                            console.log("Message error:", chrome.runtime.lastError.message);
-                            return resolve("");
-                        }
-                        resolve(extractUserVisibleHTML(res?.html || ""));
-                    });
-                }
-            );
-        });
-    });
-}
-
-let cleanHTML = await getCleanHTML();
-console.log(cleanHTML);
-
 // chat box messages
 function addMessage(role, text) {
 	const row = document.createElement('div');
@@ -76,10 +46,15 @@ form.addEventListener('submit', async(e) => {
 	if (!text) return;
 	addMessage('user', text);
 	input.value = '';
+	
 	if (isTestingMode) {
 		addMessage('bot', `Echo: ${text}`);
 	} else {
-		const botResponse = await sendToBot(text, cleanHTML);
+		// Get current tab URL
+		const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+		const currentURL = tab?.url || '';
+		
+		const botResponse = await sendToBot(text, currentURL);
         if (botResponse?.text) addMessage('bot', botResponse.text);
 	}
 });

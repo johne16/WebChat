@@ -28,6 +28,35 @@ app.post("/api/openai/chat", async (req, res) => {
     }
 });
 
+
+app.post("/api/crawl", async (req, res) => {
+	try {
+		const { urls, crawler_config } = req.body;
+		if (!urls || !Array.isArray(urls)) {
+			return res.status(400).json({ error: "Missing or invalid urls array" });
+		}
+
+		const response = await fetch("http://localhost:11235/crawl", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ 
+				urls,
+				crawler_config
+			})
+		});
+
+		if (!response.ok) {
+			throw new Error(`Crawl4AI responded with ${response.status}`);
+		}
+
+		const data = await response.json();
+		res.json(data);
+	} catch (err) {
+		res.status(500).json({ error: String(err) });
+	}
+});
+
+
 const port = process.env.PORT || 8787;
 app.listen(port, () => console.log(`Proxy running on http://localhost:${port}`));
 
