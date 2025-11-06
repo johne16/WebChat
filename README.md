@@ -17,8 +17,12 @@ connects to a local server that relays chat messages to the OpenAI API.
 
    ```
    OPENAI_API_KEY=your_openai_api_key_here
+   BRAVE_SEARCH_API_KEY=your_brave_search_api_key_here
    PORT=3000
    ```
+
+   **Note**: Get your Brave Search API key from [https://brave.com/search/api/](https://brave.com/search/api/)
+
 3. Install dependencies so that `node_modules` lives under `./server`:
 
    ```bash
@@ -65,22 +69,24 @@ Full documentation: [Chrome Manifest Reference](https://developer.chrome.com/doc
 ```
 .
 ├── extension
-│   ├── background.js
-│   ├── contentScript.js
-│   ├── extraction.js
-│   ├── icons/
-│   ├── llmClient.js
-│   ├── manifest.json
-│   ├── options.css
-│   ├── options.html
-│   ├── options.js
-│   ├── panel.css
-│   ├── panel.html
-│   └── panel.js
+│   ├── background.js          # Manages extension lifecycle, tab tracking
+│   ├── contentScript.js       # DEPRECATED: Use Crawl4AI instead
+│   ├── extraction.js          # DEPRECATED: Use Crawl4AI instead  
+│   ├── icons/                 # Extension icons
+│   ├── llmClient.js           # OpenAI API client + ReAct LLM functions
+│   ├── react.js               # ReAct loop orchestrator
+│   ├── searchClient.js        # Brave Search API client
+│   ├── manifest.json          # Extension configuration
+│   ├── options.css            # Settings page styles
+│   ├── options.html           # Settings page UI
+│   ├── options.js             # Settings page logic
+│   ├── panel.css              # Side panel styles
+│   ├── panel.html             # Side panel UI
+│   └── panel.js               # Side panel logic, message routing
 └── server
     ├── package-lock.json
     ├── package.json
-    └── server.js
+    └── server.js              # Express proxy for OpenAI, Brave Search, Crawl4AI
 ```
 
 ## Common Checks
@@ -110,20 +116,17 @@ node npm start
 
 Then interact with the extension as normal in your browser.
 
-**NOTE:** the extension starts in Testing Mode by default. To switch to AI Mode, click on the settings icon in the 
-UI and switch it to AI Mode. The logic for routing test chats vs AI chats is in panel.js:
-```javascript
-form.addEventListener('submit', async (e) => {
-	e.preventDefault();
-	const text = input.value.trim();
-	if (!text) return;
-	addMessage('user', text);
-	input.value = '';
-	if (isTestingMode) {
-		addMessage('bot', `Echo: ${text}`);
-	} else {
-		const botResponse = await sendToBot(text, cleanHTML);
-		if (botResponse?.text) addMessage('bot', botResponse.text);
-	}
-});
-```
+**NOTE:** The extension has two modes:
+
+1. **Testing Mode** (default): Echoes user input back. Good for UI testing without API calls.
+2. **AI Mode**: Connects to OpenAI and web services.
+
+To switch modes, click the settings icon (⚙️) in the side panel.
+
+Additionally, AI Mode has two sub-modes:
+- **Simple Mode**: Classifies query, crawls current site if needed, answers with LLM
+- **Research Mode**: Uses ReAct framework for iterative web search and reasoning (up to 5 steps)
+
+Toggle Research Mode via:
+- Settings page toggle switch
+- Network icon button in side panel header (glows blue when active)

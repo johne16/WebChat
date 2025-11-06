@@ -1,3 +1,9 @@
+// ============================================================================
+// DEPRECATED: This file is no longer used.
+// Web page content extraction is now handled by Crawl4AI via server/server.js
+// See extension/react.js executeFetchURL() function
+// ============================================================================
+
 // extension/extraction.js
 
 /**
