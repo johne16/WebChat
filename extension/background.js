@@ -5,7 +5,11 @@ let activeTabId = null;
 
 // initial configuration options
 chrome.runtime.onInstalled.addListener(() => {
-	chrome.storage.local.set({isTestingMode: true, modelType: 'gpt-4.1-mini'});
+	chrome.storage.local.set({
+		isTestingMode: false,
+		modelType: 'gpt-5-nano',
+		useReActMode: true  // Enable ReAct mode by default
+	});
 });
 
 // keep track of the currently active tab and pre-enable its side panel path

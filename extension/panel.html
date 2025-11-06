@@ -3,7 +3,19 @@
 <meta charset="utf-8">
 <link rel="stylesheet" href="panel.css">
 <header class="hdr"><strong>Web.Chat</strong>
-	<button id="close" type="button">x</button>
+	<div class="hdr-buttons">
+		<button id="research-mode-btn" type="button" aria-label="Deep search" title="Deep search" class="icon-btn">
+			<svg width="20" height="20" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+				<rect x="10" y="10" width="80" height="80" rx="12" fill="none" stroke="currentColor" stroke-width="6"/>
+				<circle cx="35" cy="50" r="9" fill="none" stroke="currentColor" stroke-width="6"/>
+				<circle cx="60" cy="32" r="7" fill="none" stroke="currentColor" stroke-width="6"/>
+				<circle cx="60" cy="68" r="5" fill="none" stroke="currentColor" stroke-width="6"/>
+				<line x1="41" y1="45" x2="54" y2="35" stroke="currentColor" stroke-width="6"/>
+				<line x1="41" y1="55" x2="55" y2="66" stroke="currentColor" stroke-width="6"/>
+			</svg>
+		</button>
+		<button id="close" type="button" aria-label="Close" title="Close">X</button>
+	</div>
 </header>
 <main id="log" class="log" aria-live="polite"></main>
 <footer class="ftr">

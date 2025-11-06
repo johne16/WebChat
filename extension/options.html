@@ -33,12 +33,29 @@
 	<section aria-labelledby="llm-models">
 		<h2 id="llm-models">LLM Models</h2>
 		<form id="modelForm" class="models" role="radiogroup" aria-labelledby="llm-models">
-			<label class="model"><input type="radio" name="model" value="gpt-4.1-mini" checked/><span>gpt-4.1-mini</span></label>
-			<label class="model"><input type="radio" name="model" value="gpt-4.1"/><span>gpt-4.1</span></label>
-			<label class="model"><input type="radio" name="model" value="gpt-5-nano"/><span>gpt-5-nano</span></label>
-			<label class="model"><input type="radio" name="model"
-										value="gpt-5-mini"/><span>gpt-5-mini</span></label>
+			<label class="model"><input type="radio" name="model" value="gpt-5-nano" checked/><span>gpt-5-nano</span></label>
+			<label class="model"><input type="radio" name="model" value="gpt-5-mini"/><span>gpt-5-mini</span></label>
+			<label class="model"><input type="radio" name="model" value="gpt-5"/><span>gpt-5</span></label>
 		</form>
+	</section>
+	<!-- Research mode -->
+	<section aria-labelledby="research-mode">
+		<h2 id="research-mode">Research Mode</h2>
+		<div class="switch-row">
+			<span id="simple-mode" class="mode-label">Simple Mode</span>
+
+			<button id="reactSwitch" class="switch" role="switch" aria-checked="true"
+					aria-labelledby="simple-mode research-mode-label">
+				<span class="track" aria-hidden="true"></span>
+				<span class="thumb" aria-hidden="true"></span>
+			</button>
+
+			<span id="research-mode-label" class="mode-label">Research Mode</span>
+		</div>
+		<p style="margin-top: 8px; font-size: 12px; color: #999;">
+			Research mode uses iterative web search and reasoning to answer complex questions.
+			Simple mode uses the current page only.
+		</p>
 	</section>
 </main>
 
