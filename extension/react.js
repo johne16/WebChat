@@ -60,7 +60,7 @@ export async function runReActLoop(userQuery, currentURL, onStep = null) {
         let observation;
         try {
             if (decision.action === 'search') {
-                observation = await executeSearch(decision.action_input);
+                observation = await executeSearch(decision.action_input, currentURL);
             } else if (decision.action === 'fetch_current_page') {
                 // Check if we already fetched the current page
                 if (fetchedURLs.has(currentURL)) {
@@ -154,8 +154,8 @@ export async function runReActLoop(userQuery, currentURL, onStep = null) {
 }
 
 // Execute a Brave search
-async function executeSearch(query) {
-    const results = await searchBrave(query);
+async function executeSearch(query, currentURL = null) {
+    const results = await searchBrave(query, 5, currentURL);
     return {
         type: 'search_results',
         query: query,

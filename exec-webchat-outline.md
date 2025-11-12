@@ -1,23 +1,31 @@
 # Web.Chat Executive Presentation Outline
 
-## Slide 1 – Why Customers Need This
-- Utility websites like cpsenergy.com are dense, use internal jargon, and expect customers to know exactly where to click.
-- Most visitors just want quick answers on billing, outages, or assistance but abandon the site when they cannot find the right page.
+## Slide 1 – The Problem
+- Large enterprise websites are dense, use internal jargon, and expect visitors to know exactly where to click.
+- Most visitors just want quick answers to common questions but abandon the site when they cannot find the right page.
 - Resulting support calls drive up costs and slow response times for both customers and agents.
 
 ## Slide 2 – What Web.Chat Delivers
-- A side panel that lets anyone type plain-language questions while staying on the CPS site.
+- A side panel that lets anyone type plain-language questions while staying on the website.
 - Web.Chat looks at the page you are already viewing and pairs it with fresh, trusted search snippets.
-- Customers skip the maze of menus and jargon and instead get direct, guided answers.
+- Visitors skip the maze of menus and jargon and instead get direct, guided answers.
 
 ## Slide 3 – Proof So Far & Where It Goes
-- **Phase 1:** Simple chat proved people enjoy the conversational format, but it didn’t know what was on the page.
-- **Phase 2:** Added automated crawling that collected multiple pages per question; it overwhelmed the prompt with large, mostly irrelevant excerpts, which diluted answer quality.
-- **Phase 3:** Shifted to a think-then-act loop where the AI plans, decides what evidence it actually needs, gathers 
-  just that, and then answers—paired with newer AI models, replies stay sharp and fast.
+- **Phase 1:** Built a simple assistant that could answer questions about the current page, but nothing beyond it.
+- **Phase 2:** Added automated crawling to gather multiple pages per question, but the flood of content overwhelmed the AI and diluted answer quality.
+- **Phase 3:** Shifted to a think-then-act loop where the AI plans, decides what evidence it actually needs, gathers just that, and then answers. Paired with newer AI models, replies stay sharp and fast.
 
-## Slide 4 – Limitations & Security Lens
-- **Current gap:** Web.Chat only sees public pages; customer accounts or employee tools that require login stay hidden.
-- **Possible fix:** Instead of re-downloading pages, let the assistant read what the signed-in user already has on screen.
-- **Boundaries:** Even then, it can only *read* the page in front of the user—it cannot click, type, or move through workflows on their behalf.
-- **Care needed:** Account pages can contain private details, so we would need strict masking, clear consent, and possibly an in-house AI service before sharing that data anywhere.
+## Slide 4 – The Next Challenge: Authenticated Workflows
+- **The opportunity:** Right now Web.Chat only sees public pages. Real utility comes from authenticated workflows, whether that's customers navigating their accounts or employees working with internal systems.
+- **The security problem:** These pages contain private data that cannot be sent to external AI services.
+- **What it would take:** Reading the user's screen directly instead of fetching externally, strict data masking, explicit consent, and likely an in-house AI service to keep data on-premise.
+
+### "Why Not Just Use ChatGPT?"
+
+- **Honest answer:** ChatGPT is fine, and often better, 90% of the time for general questions.
+- **Where Web.Chat adds value:**
+  - **Convenience:** No context switching; users stay on the site instead of bouncing to another tab.
+  - **Automatic context:** It already knows what page you're viewing without having to explain or paste content.
+  - **Privacy & control:** Can plug in an in-house model instead of sending queries to external AI services.
+  - **Site-specific optimization:** Can be tuned for a particular website's structure, terminology, and common user questions.
+- **Bottom line:** Not a ChatGPT replacement, but a specialized tool that makes sense when convenience, context, and control matter.

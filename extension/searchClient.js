@@ -9,10 +9,21 @@ const MIN_SEARCH_INTERVAL = 1000; // 1 second in milliseconds
  * Enforces rate limit of 1 request per second
  * @param {string} query - Search query string
  * @param {number} count - Number of results to return (default 5)
+ * @param {string} currentURL - Optional URL of current tab to restrict search to that domain
  * @returns {Promise<Array>} - Array of search results with title, url, description
  */
-export async function searchBrave(query, count = 5) {
-    console.log(`[SearchClient] Searching for: "${query}"`);
+export async function searchBrave(query, count = 5, currentURL = null) {
+    // If currentURL provided, prepend site: restriction to query
+    let finalQuery = query;
+    if (currentURL) {
+        const domain = extractRootDomain(currentURL);
+        if (domain) {
+            finalQuery = `site:${domain} ${query}`;
+            console.log(`[SearchClient] Restricting search to domain: ${domain}`);
+        }
+    }
+
+    console.log(`[SearchClient] Searching for: "${finalQuery}"`);
 
     // Rate limiting: Wait if we searched too recently
     const now = Date.now();
@@ -27,9 +38,9 @@ export async function searchBrave(query, count = 5) {
         const response = await fetch('http://localhost:8787/api/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                query: query,
-                count: count 
+            body: JSON.stringify({
+                query: finalQuery,
+                count: count
             })
         });
 
@@ -57,7 +68,7 @@ export async function searchBrave(query, count = 5) {
 function formatSearchResults(data) {
     // Brave Search API returns results in data.web.results
     const webResults = data?.web?.results || [];
-    
+
     return webResults.map((result, index) => ({
         position: index + 1,
         title: result.title || 'No title',
@@ -67,5 +78,20 @@ function formatSearchResults(data) {
         age: result.age || null,
         language: result.language || null
     }));
+}
+
+/**
+ * Extract root domain from URL (e.g., "https://example.com/page" -> "example.com")
+ * @param {string} url - Full URL
+ * @returns {string|null} - Root domain or null if invalid
+ */
+function extractRootDomain(url) {
+    try {
+        const urlObj = new URL(url);
+        return urlObj.hostname;
+    } catch (error) {
+        console.error('[SearchClient] Failed to extract domain from URL:', url, error);
+        return null;
+    }
 }
 
