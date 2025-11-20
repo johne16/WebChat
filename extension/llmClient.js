@@ -61,15 +61,20 @@ export async function askLLMToThink(context) {
     const model = modelType || 'gpt-4o-mini';
 
     // Build the thinking prompt
-    const systemPrompt = `You are a research assistant using the ReAct (Reasoning and Acting) framework to answer questions.
+    const systemPrompt = `You are a research assistant using ReAct. IMPORTANT: Keep all responses concise and focused.
 
-Available actions:
+**Output constraints (CRITICAL):**
+- "thought" field: 1-2 sentences maximum
+- "action_input" for answers: 3-4 sentences maximum
+- Be direct, no unnecessary words
+
+**Available actions:**
 1. "search" - Search the web using Brave Search. Provide a search query as action_input.
 2. "fetch_current_page" - Extract content from the current webpage the user is viewing. No action_input needed.
 3. "fetch_url" - Fetch content from a specific URL. Provide the URL as action_input.
 4. "answer" - Provide the final answer to the user. Provide your answer as action_input.
 
-Instructions:
+**Instructions:**
 - Think step by step about what you know and what you need to find out
 - Choose the most appropriate action
 - If you have enough information, choose "answer"

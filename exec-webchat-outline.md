@@ -6,9 +6,9 @@
 - Resulting support calls drive up costs and slow response times for both customers and agents.
 
 ## Slide 2 – What Web.Chat Delivers
-- A side panel that lets anyone type plain-language questions while staying on the website.
-- Web.Chat looks at the page you are already viewing and pairs it with fresh, trusted search snippets.
-- Visitors skip the maze of menus and jargon and instead get direct, guided answers.
+- Side panel for plain-language questions, no navigation.
+- Contextual answers from current page + fresh search.
+- Direct, guided answers, bypassing menus and jargon.
 
 ## Slide 3 – Proof So Far & Where It Goes
 - **Phase 1:** Built a simple assistant that could answer questions about the current page, but nothing beyond it.
