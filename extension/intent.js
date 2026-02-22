@@ -1,0 +1,179 @@
+// extension/intent.js
+// Intent detection: heuristic bypass + LLM classification
+
+const SERVER_BASE = 'http://localhost:8787';
+
+/**
+ * Intent types
+ */
+export const INTENT = {
+	SIMPLE: 'simple',      // Question about current page
+	RESEARCH: 'research',  // Needs web search
+	AGENT: 'agent'         // Needs web automation
+};
+
+/**
+ * Check if message is obviously NOT an agent task
+ * Returns true to bypass LLM intent detection
+ * @param {string} text - User message
+ * @returns {boolean}
+ */
+export function isObviouslyNotAgentTask(text) {
+	const lower = text.toLowerCase().trim();
+
+	// Action verbs that indicate agent tasks
+	const actionVerbPattern = /(sign up|signup|sign me up|register|fill out|fill in|apply|book|order|buy|purchase|create account|log in|login|submit|enroll|subscribe|checkout|check out)/;
+
+	// If it has action verbs, it's potentially an agent task - don't bypass
+	if (actionVerbPattern.test(lower)) {
+		return false;
+	}
+
+	// "Can you" / "Could you" + action is a polite request, not a question
+	// But we already checked for action verbs above, so if we're here it's likely a real question
+
+	// Starts with question word (only if no action verbs)
+	if (/^(what|why|how|where|who|when|is|are|does|do|can|could|would|should|tell me|explain|summarize)/.test(lower)) {
+		return true;
+	}
+
+	// References current page
+	if (/this (page|article|site|post|website)/.test(lower)) {
+		return true;
+	}
+
+	// Ends with ? (already confirmed no action verbs above)
+	if (lower.endsWith('?')) {
+		return true;
+	}
+
+	return false;
+}
+
+/**
+ * Check if message has explicit URL
+ * @param {string} text - User message
+ * @returns {string|null} URL if found, null otherwise
+ */
+export function extractUrl(text) {
+	const urlMatch = text.match(/https?:\/\/[^\s]+/);
+	return urlMatch ? urlMatch[0] : null;
+}
+
+/**
+ * Detect intent using LLM
+ * @param {string} text - User message
+ * @param {string} currentUrl - Current page URL for context
+ * @returns {Promise<{intent: string, url?: string, confidence: string, reasoning: string}>}
+ */
+export async function detectIntentWithLLM(text, currentUrl) {
+	const systemPrompt = `You are an intent classifier for a web assistant. Classify user messages into one of three intents:
+
+1. "simple" - Questions about the current page, requests to summarize/explain content, or general questions that can be answered with the current page context.
+
+2. "research" - Questions requiring web search to find information from multiple sources, fact-checking, or finding up-to-date information not on the current page.
+
+3. "agent" - Requests to perform actions on websites: sign up, register, fill forms, create accounts, make purchases, log in, submit applications, etc. These require browser automation.
+
+If the intent is "agent", also provide the target URL. If no URL is in the message, infer it from context (e.g., "ABC Power" → likely "https://www.abcpower.com" or similar).
+
+Respond in JSON format:
+{
+  "intent": "simple" | "research" | "agent",
+  "url": "https://..." (only for agent intent, null otherwise),
+  "confidence": "high" | "medium" | "low",
+  "reasoning": "brief explanation"
+}`;
+
+	const userPrompt = `Current page: ${currentUrl || 'unknown'}
+
+User message: "${text}"
+
+Classify this intent.`;
+
+	try {
+		const response = await fetch(`${SERVER_BASE}/api/openai/chat`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				model: 'gpt-4o-mini',  // Fast model for intent detection
+				messages: [
+					{ role: 'system', content: systemPrompt },
+					{ role: 'user', content: userPrompt }
+				]
+			})
+		});
+
+		if (!response.ok) {
+			throw new Error(`Intent detection failed: ${response.status}`);
+		}
+
+		const data = await response.json();
+		const content = data.choices?.[0]?.message?.content || '';
+
+		// Parse JSON from response (handle markdown code blocks)
+		let jsonStr = content;
+		const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+		if (jsonMatch) {
+			jsonStr = jsonMatch[1];
+		}
+
+		const result = JSON.parse(jsonStr.trim());
+		return {
+			intent: result.intent || INTENT.SIMPLE,
+			url: result.url || null,
+			confidence: result.confidence || 'medium',
+			reasoning: result.reasoning || ''
+		};
+
+	} catch (error) {
+		console.error('[Intent] LLM detection failed:', error);
+		// Default to simple on error
+		return {
+			intent: INTENT.SIMPLE,
+			url: null,
+			confidence: 'low',
+			reasoning: 'Defaulting to simple due to detection error'
+		};
+	}
+}
+
+/**
+ * Main intent detection function
+ * Uses heuristic bypass for obvious cases, LLM for ambiguous ones
+ * @param {string} text - User message
+ * @param {string} currentUrl - Current page URL
+ * @returns {Promise<{intent: string, url?: string, confidence: string, reasoning: string}>}
+ */
+export async function detectIntent(text, currentUrl) {
+	// Check for explicit URL first
+	const explicitUrl = extractUrl(text);
+
+	// Heuristic bypass: obvious non-agent tasks
+	if (isObviouslyNotAgentTask(text)) {
+		// Still need to distinguish simple vs research
+		// Simple heuristic: if it references "this page" or is about current content, it's simple
+		const refersToCurrentPage = /this (page|article|site|post|website)/.test(text.toLowerCase());
+
+		return {
+			intent: refersToCurrentPage ? INTENT.SIMPLE : INTENT.RESEARCH,
+			url: null,
+			confidence: 'high',
+			reasoning: 'Heuristic: question pattern detected'
+		};
+	}
+
+	// Has explicit URL + action words = likely agent task
+	const hasActionVerb = /(sign up|signup|register|fill out|fill in|apply|book|order|buy|purchase|create account|log in|login|submit|enroll|subscribe|checkout|check out)/.test(text.toLowerCase());
+	if (explicitUrl && hasActionVerb) {
+		return {
+			intent: INTENT.AGENT,
+			url: explicitUrl,
+			confidence: 'high',
+			reasoning: 'Heuristic: explicit URL with action verb'
+		};
+	}
+
+	// Ambiguous case: use LLM
+	return await detectIntentWithLLM(text, currentUrl);
+}

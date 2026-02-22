@@ -10,3 +10,6 @@ node_modules/
 
 # JetBrains IDE settings
 .idea/
+
+# Claude settings files
+.claude/

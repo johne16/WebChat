@@ -1,10 +1,14 @@
 // extension/llmClient.js
 
 export async function sendToBot(userText, currentURL) {
+    console.log('[llmClient] sendToBot called with:', { userText, currentURL });
+
     const { modelType } = await chrome.storage.local.get('modelType');
     const model = modelType || 'gpt-4o-mini';
+    console.log('[llmClient] Using model:', model);
 
     // Scrape current page only
+    console.log('[llmClient] Starting crawl request...');
     const crawlRes = await fetch('http://localhost:8787/api/crawl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -18,36 +22,41 @@ export async function sendToBot(userText, currentURL) {
         })
     });
 
+    console.log('[llmClient] Crawl response status:', crawlRes.status);
     if (!crawlRes.ok) throw new Error(`Crawl error ${crawlRes.status}`);
-    
+
     const crawlData = await crawlRes.json();
     const pageContent = crawlData.results?.[0]?.markdown?.raw_markdown || '';
+    console.log('[llmClient] Crawl successful, content length:', pageContent.length);
 
     // Send to LLM with page content
     const llmBody = {
         model,
         messages: [
-            { 
-                role: 'system', 
+            {
+                role: 'system',
                 content: 'Answer the user\'s question based on the provided webpage content.'
             },
-            { 
-                role: 'user', 
+            {
+                role: 'user',
                 content: `Page URL: ${currentURL}\n\nPage content:\n${pageContent}\n\nUser question: ${userText}`
             }
         ]
     };
 
+    console.log('[llmClient] Sending to OpenAI API...');
     const res = await fetch('http://localhost:8787/api/openai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(llmBody)
     });
 
+    console.log('[llmClient] OpenAI response status:', res.status);
     if (!res.ok) throw new Error(`LLM error ${res.status}`);
 
     const data = await res.json();
     const text = data?.choices?.[0]?.message?.content || '';
+    console.log('[llmClient] OpenAI response received, text length:', text.length);
     return { text, raw: data };
 }
 

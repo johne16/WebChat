@@ -8,7 +8,8 @@ chrome.runtime.onInstalled.addListener(() => {
 	chrome.storage.local.set({
 		isTestingMode: false,
 		modelType: 'gpt-5-nano',
-		useReActMode: true  // Enable ReAct mode by default
+		useReActMode: true,  // Enable ReAct mode by default
+		encryptedUserProfile: null  // Encrypted user profile for agent mode
 	});
 });
 
