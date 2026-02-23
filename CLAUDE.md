@@ -4,16 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Web.Chat is a Chromium extension that adds an AI-powered side panel for exploring and understanding web pages. It consists of a browser extension (`extension/`) that communicates with a local Express server (`server/`) which proxies requests to OpenAI, Brave Search, and Crawl4AI services.
+WebChat is a Chromium extension that adds an AI-powered side panel for exploring and understanding web pages. It consists of a browser extension (`extension/`), a local Express server (`server/`), and an autonomous web agent (`web_agent/`). The server proxies requests to OpenAI, Brave Search, and Crawl4AI, and spawns/manages agent processes. The extension handles UI only.
 
 **Project Structure:**
-- **`extension/`**: Frontend browser extension code (panel UI, background scripts, runtime logic)
-  - `panel.js`, `llmClient.js`, `react.js`, `searchClient.js`, `background.js`, `options.js`
-  - `agentClient.js`, `crypto.js`, `profile.js` (agent mode components)
+- **`extension/`**: Frontend browser extension (panel UI, background scripts, runtime logic)
+  - `panel.js`, `ui.js`, `agent.js`, `intent.js`, `agentClient.js`
+  - `llmClient.js`, `react.js`, `searchClient.js`
+  - `background.js`, `options.js`
+  - `profile.js`, `crypto.js` (profile management)
   - Assets in `extension/icons/`
 - **`server/`**: Backend Express proxy server
-  - `server.js` with isolated dependencies in `server/node_modules`
+  - `server.js` — main server with all endpoints
+  - `database.js` — SQLite database module
+  - `data/webchat.db` — SQLite database
   - Environment secrets in `server/.env`
+- **`web_agent/`**: Autonomous web agent (Python/FastAPI)
+  - `src/` — agent modules (web_agent.py, llm.py, browser.py, etc.)
+  - `prompts/` — LLM planning prompts
+  - See `web_agent/CLAUDE.md` for details
 
 ## Development Setup
 
@@ -21,7 +29,7 @@ Web.Chat is a Chromium extension that adds an AI-powered side panel for explorin
 - Node.js and npm installed
 - Chromium-based browser (Chrome, Brave, Edge)
 - Docker installed (for Crawl4AI)
-- Python 3.10+ with WEB_AGENT project (for Agent Mode)
+- Python 3.13+ with dependencies from `web_agent/requirements.txt`
 
 ### Server Setup
 
@@ -47,8 +55,8 @@ Web.Chat is a Chromium extension that adds an AI-powered side panel for explorin
    # Terminal 2: WebChat server
    cd server && npm start
 
-   # Terminal 3: Web Agent (for Agent Mode only)
-   cd path/to/WEB_AGENT && python -m src.agent_service
+   # Terminal 3: Web Agent (for Agent Mode)
+   cd web_agent && python -m src.agent_service
    ```
 
 ### Extension Installation
@@ -58,84 +66,118 @@ Web.Chat is a Chromium extension that adds an AI-powered side panel for explorin
 3. Click "Load unpacked" → select `./extension` directory
 4. Keyboard shortcut: `Ctrl+Shift+Y` (Windows) / `Command+Shift+Y` (Mac)
 
-**Critical**: Crawl4AI and the local server must be running for the extension to function. The web agent must also be running for Agent Mode.
+**Critical**: Crawl4AI and the local server must be running for the extension to function. The web agent must also be running for agent tasks.
 
 ## Architecture
 
-### Request Flow
+### How Messages Are Routed
 
-**Simple Mode** (default):
-1. User sends message via `panel.js`
-2. `llmClient.js::sendToBot()` crawls current page via Crawl4AI
-3. Page content + user query sent to OpenAI via server proxy
-4. Response displayed in panel
+There are no user-facing mode toggles (removed in Phase 4). The system uses LLM-driven intent detection:
 
-**Research Mode** (ReAct framework):
 1. User sends message via `panel.js`
-2. `react.js::runReActLoop()` orchestrates iterative Think→Act→Observe loop (max 5 iterations)
-3. `llmClient.js::askLLMToThink()` gets LLM to decide next action:
+2. `intent.js::detectIntent()` classifies intent using heuristics first, then LLM fallback:
+   - **Simple**: Direct question about current page → `llmClient.js::sendToBot()`
+   - **Research**: Needs web search → `react.js::runReActLoop()`
+   - **Agent**: Needs browser automation → confirmation prompt, then agent spawning
+3. Response displayed in panel
+
+### Simple Chat Flow
+1. `llmClient.js::sendToBot()` crawls current page via Crawl4AI
+2. Page content + user query sent to OpenAI via server proxy
+3. Response displayed in panel
+
+### Research Flow (ReAct framework)
+1. `react.js::runReActLoop()` orchestrates iterative Think→Act→Observe loop (max 5 iterations)
+2. `llmClient.js::askLLMToThink()` decides next action:
    - `search`: Query Brave Search API
    - `fetch_current_page`: Crawl current tab's page
    - `fetch_url`: Crawl specific URL
    - `answer`: Return final answer
-4. Execute action via `searchClient.js` or Crawl4AI
-5. Add observation to context, repeat loop
-6. Final answer via `llmClient.js::askLLMToAnswer()` if iteration limit hit
+3. Execute action via `searchClient.js` or Crawl4AI
+4. Add observation to context, repeat loop
+5. Final answer via `llmClient.js::askLLMToAnswer()` if iteration limit hit
 
-**Agent Mode** (autonomous web automation):
-1. User clicks agent mode button → password modal appears
-2. User enters passphrase → `crypto.js` decrypts profile from `chrome.storage.local`
-3. `agentClient.js::startAgentContainer()` calls server to check agent health on port 5001
-4. If agent not running, server returns error instructing user to start it manually
-5. User sends goal with URL (e.g., "Sign me up at https://example.com")
-6. `agentClient.js::executeGoal()` sends goal + profile to agent via server proxy
-7. Agent executes task in visible browser window, returns status:
-   - `achieved`: Task completed → show success message
-   - `needs_input`: Missing data → render inline form in chat log, user submits, save to `siteData`, call `continueSession()`
-   - `awaiting_user_action`: Manual action needed → show sticky banner, user acts, clicks Continue
+### Agent Flow (multi-agent, autonomous web automation)
+1. Intent detected as agent task → user sees confirmation prompt (yes/no)
+2. User confirms → password modal for passphrase
+3. `agent.js::unlockProfile()` decrypts profile from `chrome.storage.local`
+4. `agent.js::startAgentSession()` → server spawns Python agent process via `child_process` on available port (5001-5005)
+5. `agent.js::executeAgentGoal()` sends goal + profile to agent via server proxy
+6. Agent executes task in visible Playwright browser, reports status via webhooks to server
+7. Server broadcasts status to extension via SSE
+8. Terminal states:
+   - `achieved`: Task completed → success message
+   - `needs_input`: Missing data → inline form rendered, user submits, data saved to profile's siteData
+   - `awaiting_user_action`: Manual action needed (captcha, etc.) → sticky banner, user acts, clicks Continue
 
-**Note**: URLs must include full protocol (e.g., `https://example.com` not just `example.com`).
+**Note**: URLs in goals must include full protocol (e.g., `https://example.com` not just `example.com`).
 
 ### Key Components
 
 **Extension Side**:
-- `panel.js`: UI controller, message routing, mode switching, agent mode integration
+- `panel.js`: Main orchestrator — form submission, intent routing, SSE setup, agent control
+- `ui.js`: Reusable UI rendering (messages, forms, banners, step indicators)
+- `agent.js`: Agent session management, profile encryption/decryption, site data storage
+- `intent.js`: Intent detection (heuristic bypass + LLM classification via gpt-4o-mini)
+- `agentClient.js`: Server communication — SSE subscription, agent API calls
 - `llmClient.js`: OpenAI API client with ReAct LLM functions
 - `react.js`: ReAct loop orchestrator with duplicate detection and early bailout
 - `searchClient.js`: Brave Search client with 1 req/sec rate limiting
-- `agentClient.js`: Web agent API client (check health, execute goal, continue session)
 - `crypto.js`: AES-256-GCM encryption with PBKDF2 key derivation for user profile
-- `profile.js`: Profile management page logic (create, unlock, save, change passphrase, delete)
+- `profile.js`: Profile management page (create, unlock, save, change passphrase, delete)
 - `background.js`: Extension lifecycle, tab tracking, panel state management
-- `options.js`: Settings page for Testing/AI mode, model selection, ReAct toggle
+- `options.js`: Settings page for Testing/AI mode and model selection
 
 **Server Side**:
 - `server.js`: Express proxy (ES modules) with endpoints:
   - `POST /api/openai/chat`: OpenAI completions
   - `POST /api/search`: Brave Search web search
   - `POST /api/crawl`: Crawl4AI proxy (forwards to localhost:11235)
-  - `POST /api/agent/start`: Check if agent is running on port 5001
-  - `POST /api/agent/execute-goal`: Proxy goal execution to agent
-  - `POST /api/agent/continue`: Proxy session continue to agent
-  - `POST /api/agent/stop`: No-op (agent runs independently)
-  - `GET /api/agent/health/:port`: Check agent health
+  - `POST /api/agent/start`: Spawn new agent process
+  - `POST /api/agent/execute-goal`: Proxy goal execution (merges DB profile)
+  - `POST /api/agent/continue`: Continue paused agent session
+  - `POST /api/agent/stop`: Kill agent process
+  - `GET /api/agent/status`: List running agents and available ports
+  - `GET /api/agent/health/:port`: Health check for specific agent
+  - `POST /api/agent/webhook`: Receive status updates from agents
+  - `GET /api/events`: SSE stream for real-time updates to extension
+  - `GET /api/agent/needs-input`: Get pending input request queue
+  - `POST /api/agent/provide-input`: Provide data to waiting agent
+  - `GET/POST/DELETE /api/db/profile`: User profile CRUD
+  - `POST /api/db/profile/extra`: Update single extra profile field
+  - `GET/POST/DELETE /api/db/site-data`: Site-specific data CRUD
+  - `GET/POST/DELETE /api/db/conversations`: Conversation history
+  - `GET/POST/DELETE /api/db/learned`: Learned context facts
+  - `GET /api/db/user-data`: Full user data (profile + site data)
+- `database.js`: SQLite module with tables for users, profile, site_data, conversations, learned_context
+
+**Web Agent Side** (`web_agent/`):
+- `web_agent.py`: Main orchestrator (autonomous loop)
+- `action_executor.py`: Action execution (fill_form, click_link, click_button, etc.)
+- `llm.py`: OpenAI GPT-5 client for planning and code generation
+- `browser.py`: Playwright wrapper + HTML preprocessing
+- `memory.py`: SQLite-backed session memory
+- `execution_engine.py`: JS validation + execution in browser
+- `agent_service.py`: FastAPI server with webhook callbacks
 
 **Deprecated**:
 - `contentScript.js` and `extraction.js`: Old DOM extraction approach, replaced by Crawl4AI
 
-### Mode System
+### Multi-Agent Details
 
-**Testing Mode**: Echoes user input without API calls (toggle via settings ⚙️)
+- **Port Pool**: 5001-5005 (max 5 concurrent agents)
+- **Spawning**: Server uses `child_process.spawn()` with `--port`, `--callback-url`, `--database-path` args
+- **Health Check**: Up to 30 attempts after spawn before declaring failure
+- **Timeout**: 10 minutes per agent, killed if exceeded
+- **Crash Handling**: One automatic restart attempt on unexpected exit
+- **Graceful Shutdown**: Server kills all agents on SIGINT/SIGTERM
 
-**AI Mode** has two sub-modes:
-- **Simple Mode**: Single-shot query with current page context
-- **Research Mode**: ReAct framework with iterative web search (toggle via network icon 🌐 or settings)
+### Communication
 
-**Agent Mode**: Autonomous web automation (toggle via robot icon 🤖 in panel header)
-- Requires passphrase to unlock encrypted user profile
-- Agent runs directly on host (port 5001), must be started manually
-- Executes goals in visible Playwright browser
-- Handles interactive states: `needs_input`, `awaiting_user_action`
+- **Agent → Server**: Webhooks (agent POSTs status updates to server callback URL)
+- **Server → Extension**: SSE (Server-Sent Events stream at `/api/events`)
+- **Needs Input Queue**: Server maintains queue of pending input requests; extension renders inline forms one at a time
+- **SSE Reconnect**: Extension tracks `lastSeenTimestamp` to avoid duplicate alerts on reconnect
 
 ### ReAct Loop Details
 
@@ -144,34 +186,34 @@ Web.Chat is a Chromium extension that adds an AI-powered side panel for explorin
 - **Duplicate Prevention**: Tracks fetched URLs to prevent re-crawling
 - **Rate Limiting**: Search enforces 1 req/sec via `searchClient.js`
 
+### Database
+
+- **Engine**: SQLite at `server/data/webchat.db`
+- **Tables**: users, profile, site_data, conversations, learned_context
+- **Access**: Server reads/writes; agents read only (via `--database-path` arg)
+- **Multi-user Ready**: All tables have `user_id` foreign keys; currently hardcoded to user ID 1
+- **Encryption at Rest**: Deferred — will be addressed before sharing with users
+
 ### Profile Management
 
 The profile page (`profile.html`) has two distinct views:
 
 **Create Profile** (no existing profile):
 - Passphrase + Confirm Passphrase fields
-- "Create Profile" button
 - Validates passwords match and minimum 4 characters
 
 **Unlock Profile** (existing profile):
-- Single passphrase field
-- "Unlock" button
-- Decrypts profile on success
+- Single passphrase field → decrypts profile on success
 
 **Once Unlocked**:
 - Edit personal information (firstName, lastName, email, phone, address, etc.)
 - View/manage site-specific data (organized by domain)
-- Save changes
-- Change passphrase (requires entering current passphrase first)
-- Delete profile (in "Danger Zone" section, double confirmation required)
-- Lock profile (returns to unlock view)
+- Save changes, change passphrase, delete profile, lock profile
 
 **Site-Specific Data**:
 - Inline form submissions during agent tasks are saved to `profile.siteData[domain]`
-- Data is displayed in expandable site items
 - Sensitive fields (password, secret, token, key, pin, cvv, ssn) are masked in display
 - Individual fields or entire sites can be deleted
-- All site data is encrypted with the profile
 
 ## Development Workflow
 
@@ -179,7 +221,7 @@ The profile page (`profile.html`) has two distinct views:
 
 After code changes to extension files:
 1. Go to `chrome://extensions`
-2. Click reload button for Web.Chat extension
+2. Click reload button for WebChat extension
 3. For debugging, open DevTools: `⋮ > More tools > Developer tools` (while panel is open)
 
 After changes to `manifest.json` or `options.html`: Full browser restart may be required.
@@ -196,25 +238,23 @@ After changes to `manifest.json` or `options.html`: Full browser restart may be 
 
 ### Testing Guidelines
 
-Automated tests are not yet wired up; rely on manual end-to-end testing.
+Automated tests are not yet wired up for the extension/server; rely on manual end-to-end testing. The web agent has a full test suite (~120 tests) — see `web_agent/README.md`.
 
 **Standard Smoke Test**:
 1. Start Crawl4AI: `docker run -p 11235:11235 unclecode/crawl4ai`
 2. Start server: `cd server && npm start`
 3. Load the extension in browser
 4. Verify Testing Mode echo works
-5. Toggle AI/Research Modes and confirm:
-   - Brave search calls appear in terminal logs
-   - Crawl4AI requests succeed
-   - OpenAI responses render correctly
+5. Send a question and confirm intent detection routes correctly
+6. Confirm Brave search, Crawl4AI, and OpenAI responses work
 
-**Agent Mode Smoke Test**:
-1. Start agent: `cd path/to/WEB_AGENT && python -m src.agent_service`
-2. Create user profile via Settings → Manage Profile (passphrase + confirm)
-3. Click agent mode button (🤖) in panel, enter passphrase
-4. Verify "Agent ready" message appears
-5. Send: "Sign me up at http://localhost:5000/signup" (requires test server)
-6. Verify agent browser window opens and executes
+**Agent Smoke Test**:
+1. Start agent: `cd web_agent && python -m src.agent_service`
+2. Open panel, send an agent-style message (e.g., "Sign me up at http://localhost:5000/signup")
+3. Confirm intent detection prompts for confirmation
+4. Enter passphrase when prompted
+5. Verify agent browser window opens and executes
+6. Verify SSE status updates appear in panel
 
 **Profile Management Test**:
 1. Go to Settings → Manage Profile
@@ -223,13 +263,6 @@ Automated tests are not yet wired up; rely on manual end-to-end testing.
 4. Lock profile, then unlock with passphrase
 5. Change passphrase (enter old, new, confirm new)
 6. Delete profile (in Danger Zone)
-
-**Site Data Test**:
-1. Complete an agent task that requires inline form input
-2. Go to Settings → Manage Profile → Unlock
-3. Expand "Saved Site Data" section
-4. Verify submitted data appears under the site domain
-5. Test deleting individual fields and entire sites
 
 **Browser Testing**: Test on both Chromium Stable and Brave when touching permissions or storage APIs.
 
@@ -268,7 +301,7 @@ When adding tests in the future, colocate them beside the module (e.g., `extensi
 
 - **Server**: Port specified in `.env` (default 8787)
 - **Crawl4AI**: Must run on port 11235
-- **Web Agent**: Runs on port 5001 (direct host mode)
+- **Web Agents**: Ports 5001-5005 (dynamically assigned by server)
 - Extension code uses `http://localhost:8787` for server communication
 
 ### Storage Architecture
@@ -280,6 +313,12 @@ Extension uses `chrome.storage.local` for:
 - `encryptedUserProfile`: Encrypted user profile for agent mode (AES-256-GCM)
   - Contains standard fields (firstName, lastName, email, etc.)
   - Contains `siteData` object: `{ [domain]: { [fieldName]: value } }`
+
+Server uses SQLite (`server/data/webchat.db`) for:
+- User profile (plaintext, encryption deferred)
+- Site-specific data
+- Conversation history
+- Learned context facts
 
 Changes are synchronized across extension contexts via `chrome.storage.onChanged` listeners.
 
@@ -301,7 +340,7 @@ docker run -p 11235:11235 unclecode/crawl4ai
 cd server && npm start
 
 # Terminal 3: Web Agent (for Agent Mode)
-cd path/to/WEB_AGENT && python -m src.agent_service
+cd web_agent && python -m src.agent_service
 ```
 
 ### Testing Mode
@@ -309,6 +348,6 @@ Toggle via settings ⚙️ to test UI without consuming API credits.
 
 ### Debugging
 - Panel DevTools: Right-click panel → Inspect
-- Background script: `chrome://extensions` → Web.Chat → Inspect views: background page
+- Background script: `chrome://extensions` → WebChat → Inspect views: background page
 - Server logs: Terminal where `npm start` is running
 - Agent logs: Terminal where `python -m src.agent_service` is running

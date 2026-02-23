@@ -1,0 +1,10 @@
+[
+  {
+    "form_html": "<form id=\"contact\" action=\"/submit\" method=\"post\">\n  <input id=\"fname\" name=\"first_name\" type=\"text\" required /> (First Name)\n  <input id=\"lname\" name=\"last_name\" type=\"text\" required /> (Last Name)\n  <button type=\"submit\">Submit</button>\n</form>",
+    "user_profile": {
+      "firstName": "John",
+      "lastName": "Doe"
+    },
+    "generated_code": "async function fillForm() {\n  // Fill first name field\n  await fillField('#fname', 'John');\n  \n  // Fill last name field\n  await fillField('#lname', 'Doe');\n}"
+  }
+]

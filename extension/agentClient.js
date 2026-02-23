@@ -155,9 +155,6 @@ export async function startAgent(taskId) {
 	return data;
 }
 
-// Alias for backwards compatibility
-export const startAgentContainer = startAgent;
-
 
 /**
  * Execute a goal using the agent

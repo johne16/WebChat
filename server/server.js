@@ -4,6 +4,10 @@ import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
 import { spawn } from "child_process";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import {
     initDatabase,
     getDatabasePath,
@@ -137,8 +141,8 @@ app.post("/api/search", async (req, res) => {
 // Configuration
 const AGENT_CONFIG = {
     portPool: [5001, 5002, 5003, 5004, 5005],
-    agentPath: process.env.WEB_AGENT_PATH || "C:\\Users\\John\\PycharmProjects\\WEB_AGENT",
-    pythonPath: process.env.WEB_AGENT_PYTHON || "C:\\Users\\John\\PycharmProjects\\WEB_AGENT\\.venv\\Scripts\\python.exe",
+    agentPath: process.env.WEB_AGENT_PATH || path.resolve(__dirname, "..", "web_agent"),
+    pythonPath: process.env.WEB_AGENT_PYTHON || path.resolve(__dirname, "..", "web_agent", ".venv", "Scripts", "python.exe"),
     timeoutMs: 10 * 60 * 1000,  // 10 minutes
     healthCheckIntervalMs: 1000,
     healthCheckMaxAttempts: 30,

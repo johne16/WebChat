@@ -3,6 +3,7 @@
 # Environment variables
 .env
 /server/.env
+/web_agent/.env
 
 # Node dependencies
 node_modules/
