@@ -1,6 +1,7 @@
 """Action Executor - Execute actions decided by the planner"""
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, Callable, Awaitable
 from src.browser import BrowserManager
@@ -15,9 +16,11 @@ class ActionResult:
     success: bool
     action_type: str
     details: Dict[str, Any]
-    error: Optional[str] = None
+    error: Optional[Dict[str, Any]] = None
     navigated: bool = False
     new_url: Optional[str] = None
+    execution_time: float = 0.0
+    navigation_wait_time: float = 0.0
 
 
 class ActionExecutor:
@@ -58,15 +61,13 @@ class ActionExecutor:
     async def execute_action(
         self,
         action_type: str,
-        params: Dict[str, Any],
-        user_profile: Dict[str, Any]
+        params: Dict[str, Any]
     ) -> ActionResult:
         """Execute an action decided by the planner
 
         Args:
             action_type: Type of action to execute
             params: Action-specific parameters
-            user_profile: User profile data (for form filling)
 
         Returns:
             ActionResult with success status and details
@@ -78,34 +79,32 @@ class ActionExecutor:
                 success=False,
                 action_type=action_type,
                 details={"params": params},
-                error=f"Unknown action type: {action_type}"
+                error={"type": "unknown_action", "message": f"Unknown action type: {action_type}", "details": {}}
             )
 
+        t0 = time.perf_counter()
         try:
-            # Pass user_profile to fill_form, others don't need it
-            if action_type == "fill_form":
-                return await handler(params, user_profile)
-            else:
-                return await handler(params)
+            result = await handler(params)
+            result.execution_time = time.perf_counter() - t0
+            return result
 
         except Exception as e:
             return ActionResult(
                 success=False,
                 action_type=action_type,
                 details={"params": params},
-                error=str(e)
+                error={"type": "action_error", "message": str(e), "details": {}},
+                execution_time=time.perf_counter() - t0
             )
 
     async def _execute_fill_form(
         self,
-        params: Dict[str, Any],
-        user_profile: Dict[str, Any]
+        params: Dict[str, Any]
     ) -> ActionResult:
         """Fill and optionally submit a form
 
         Args:
             params: {"submit": bool}
-            user_profile: User data to fill
 
         Returns:
             ActionResult
@@ -113,15 +112,16 @@ class ActionExecutor:
         # Get form HTML
         form_html = await self.browser.get_form_elements()
 
-        if "No forms found" in form_html:
+        if form_html is None:
             return ActionResult(
                 success=False,
                 action_type="fill_form",
                 details={},
-                error="No forms found on page"
+                error={"type": "no_forms", "message": "No forms found on page", "details": {}}
             )
 
         # Merge memory data with user profile (memory takes precedence for reuse)
+        user_profile = self.memory.user_profile
         merged_profile = user_profile.copy()
         for key, value in self.memory.entered_data.items():
             if key not in merged_profile:
@@ -137,7 +137,7 @@ class ActionExecutor:
                 success=False,
                 action_type="fill_form",
                 details={"code": llm_result["code"]},
-                error=f"Validation failed: {error}"
+                error={"type": "validation_error", "message": f"Validation failed: {error}", "details": {}}
             )
 
         # Extract submit button if submitting
@@ -156,7 +156,7 @@ class ActionExecutor:
                 success=False,
                 action_type="fill_form",
                 details=exec_result,
-                error=exec_result["error"]["message"]
+                error=exec_result["error"]
             )
 
         # Store entered data in memory for reuse
@@ -165,12 +165,14 @@ class ActionExecutor:
         # Handle submit if requested
         navigated = False
         new_url = None
+        nav_wait = 0.0
 
         if submit and submit_selector:
             current_url = self.browser.page.url
 
             try:
                 # Wait for navigation and click submit
+                nav_t0 = time.perf_counter()
                 wait_task = asyncio.create_task(
                     self.browser.page.wait_for_url(
                         lambda url: url != current_url,
@@ -180,12 +182,13 @@ class ActionExecutor:
 
                 await self.browser.page.click(submit_selector)
                 await wait_task
+                nav_wait = time.perf_counter() - nav_t0
                 navigated = True
                 new_url = self.browser.page.url
 
             except Exception:
                 # Submit might not navigate (e.g., validation error on page)
-                pass
+                nav_wait = time.perf_counter() - nav_t0
 
         return ActionResult(
             success=True,
@@ -195,7 +198,8 @@ class ActionExecutor:
                 "submitted": submit and submit_selector is not None
             },
             navigated=navigated,
-            new_url=new_url
+            new_url=new_url,
+            navigation_wait_time=nav_wait
         )
 
     def _store_entered_data(self, profile: Dict[str, Any]) -> None:
@@ -204,27 +208,29 @@ class ActionExecutor:
         Args:
             profile: User profile data that was used
         """
-        # Store common fields that might be reused
-        reusable_fields = [
-            "email", "password", "firstName", "lastName", "phone",
-            "username", "name"
-        ]
+        # Store all non-empty profile fields for reuse
+        for field, value in profile.items():
+            if field == "address" and isinstance(value, dict):
+                for key, addr_value in value.items():
+                    if addr_value:
+                        self.memory.remember(f"address_{key}", addr_value)
+            elif value:
+                self.memory.remember(field, value)
 
-        for field in reusable_fields:
-            if field in profile and profile[field]:
-                self.memory.remember(field, profile[field])
-
-        # Also store nested address fields
-        if "address" in profile and isinstance(profile["address"], dict):
-            for key, value in profile["address"].items():
-                if value:
-                    self.memory.remember(f"address_{key}", value)
-
-    async def _execute_click_link(self, params: Dict[str, Any]) -> ActionResult:
-        """Click a link to navigate
+    async def _execute_click(
+        self,
+        params: Dict[str, Any],
+        action_type: str,
+        text_param: str,
+        element_selector: str
+    ) -> ActionResult:
+        """Click a link or button
 
         Args:
-            params: {"link_text": str} or {"selector": str}
+            params: {"selector": str} or {text_param: str}
+            action_type: "click_link" or "click_button"
+            text_param: Name of the text parameter ("link_text" or "button_text")
+            element_selector: CSS selector prefix for text matching ("a" or "button")
 
         Returns:
             ActionResult
@@ -234,86 +240,49 @@ class ActionExecutor:
         try:
             if "selector" in params:
                 await self.browser.page.click(params["selector"])
-            elif "link_text" in params:
-                # Find link by text (partial match, case insensitive)
-                link_text = params["link_text"]
-                await self.browser.page.click(f"a:has-text('{link_text}')")
+            elif text_param in params:
+                text = params[text_param]
+                await self.browser.page.click(f"{element_selector}:has-text('{text}')")
             else:
                 return ActionResult(
                     success=False,
-                    action_type="click_link",
+                    action_type=action_type,
                     details=params,
-                    error="Missing link_text or selector parameter"
-                )
-
-            # Wait for navigation
-            await self.browser.page.wait_for_load_state("networkidle")
-
-            new_url = self.browser.page.url
-            navigated = new_url != current_url
-
-            return ActionResult(
-                success=True,
-                action_type="click_link",
-                details={"clicked": params.get("link_text") or params.get("selector")},
-                navigated=navigated,
-                new_url=new_url if navigated else None
-            )
-
-        except Exception as e:
-            return ActionResult(
-                success=False,
-                action_type="click_link",
-                details=params,
-                error=str(e)
-            )
-
-    async def _execute_click_button(self, params: Dict[str, Any]) -> ActionResult:
-        """Click a button
-
-        Args:
-            params: {"button_text": str} or {"selector": str}
-
-        Returns:
-            ActionResult
-        """
-        current_url = self.browser.page.url
-
-        try:
-            if "selector" in params:
-                await self.browser.page.click(params["selector"])
-            elif "button_text" in params:
-                button_text = params["button_text"]
-                await self.browser.page.click(f"button:has-text('{button_text}')")
-            else:
-                return ActionResult(
-                    success=False,
-                    action_type="click_button",
-                    details=params,
-                    error="Missing button_text or selector parameter"
+                    error={"type": "missing_param", "message": f"Missing {text_param} or selector parameter", "details": {}}
                 )
 
             # Wait for any navigation
+            nav_t0 = time.perf_counter()
             await self.browser.page.wait_for_load_state("networkidle")
+            nav_wait = time.perf_counter() - nav_t0
 
             new_url = self.browser.page.url
             navigated = new_url != current_url
 
             return ActionResult(
                 success=True,
-                action_type="click_button",
-                details={"clicked": params.get("button_text") or params.get("selector")},
+                action_type=action_type,
+                details={"clicked": params.get(text_param) or params.get("selector")},
                 navigated=navigated,
-                new_url=new_url if navigated else None
+                new_url=new_url if navigated else None,
+                navigation_wait_time=nav_wait
             )
 
         except Exception as e:
             return ActionResult(
                 success=False,
-                action_type="click_button",
+                action_type=action_type,
                 details=params,
-                error=str(e)
+                error={"type": "click_error", "message": str(e), "details": {}}
             )
+
+    async def _execute_click_link(self, params: Dict[str, Any]) -> ActionResult:
+        """Click a link to navigate"""
+        return await self._execute_click(params, "click_link", "link_text", "a")
+
+    async def _execute_click_button(self, params: Dict[str, Any]) -> ActionResult:
+        """Click a button"""
+        return await self._execute_click(params, "click_button", "button_text", "button")
 
     async def _execute_go_back(self, params: Dict[str, Any]) -> ActionResult:
         """Navigate back in browser history
@@ -323,9 +292,9 @@ class ActionExecutor:
         """
         current_url = self.browser.page.url
 
-        success = await self.browser.go_back()
+        go_back_result = await self.browser.go_back()
 
-        if success:
+        if go_back_result["success"]:
             new_url = self.browser.page.url
             return ActionResult(
                 success=True,
@@ -339,7 +308,7 @@ class ActionExecutor:
                 success=False,
                 action_type="go_back",
                 details={},
-                error="Failed to navigate back"
+                error=go_back_result["error"]
             )
 
     async def _execute_scroll(self, params: Dict[str, Any]) -> ActionResult:
@@ -379,7 +348,7 @@ class ActionExecutor:
                 success=False,
                 action_type="wait",
                 details=params,
-                error="Missing selector parameter"
+                error={"type": "missing_param", "message": "Missing selector parameter", "details": {}}
             )
 
         try:
@@ -394,7 +363,7 @@ class ActionExecutor:
                 success=False,
                 action_type="wait",
                 details=params,
-                error=f"Timeout waiting for {selector}: {str(e)}"
+                error={"type": "timeout_error", "message": f"Timeout waiting for {selector}: {str(e)}", "details": {}}
             )
 
     async def _execute_read_content(self, params: Dict[str, Any]) -> ActionResult:
@@ -441,7 +410,7 @@ class ActionExecutor:
                 success=False,
                 action_type="read_content",
                 details=params,
-                error=str(e)
+                error={"type": "read_error", "message": str(e), "details": {}}
             )
 
     async def _execute_none(self, params: Dict[str, Any]) -> ActionResult:

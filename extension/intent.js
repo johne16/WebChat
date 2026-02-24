@@ -1,7 +1,16 @@
 // extension/intent.js
 // Intent detection: heuristic bypass + LLM classification
 
-const SERVER_BASE = 'http://localhost:8787';
+import { callLLMForContent } from './llmClient.js';
+import { parseJsonFromLLM } from './utils.js';
+
+// Intent detection uses gpt-4o-mini regardless of user's model selection.
+// This is intentional: intent classification needs to be fast and cheap,
+// and doesn't benefit from larger models.
+const INTENT_MODEL = 'gpt-4o-mini';
+
+// Action verbs that indicate agent tasks (single source of truth)
+const ACTION_VERB_PATTERN = /(sign up|signup|sign me up|register|fill out|fill in|apply|book|order|buy|purchase|create account|log in|login|submit|enroll|subscribe|checkout|check out)/;
 
 /**
  * Intent types
@@ -18,14 +27,11 @@ export const INTENT = {
  * @param {string} text - User message
  * @returns {boolean}
  */
-export function isObviouslyNotAgentTask(text) {
+function isObviouslyNotAgentTask(text) {
 	const lower = text.toLowerCase().trim();
 
-	// Action verbs that indicate agent tasks
-	const actionVerbPattern = /(sign up|signup|sign me up|register|fill out|fill in|apply|book|order|buy|purchase|create account|log in|login|submit|enroll|subscribe|checkout|check out)/;
-
 	// If it has action verbs, it's potentially an agent task - don't bypass
-	if (actionVerbPattern.test(lower)) {
+	if (ACTION_VERB_PATTERN.test(lower)) {
 		return false;
 	}
 
@@ -55,7 +61,7 @@ export function isObviouslyNotAgentTask(text) {
  * @param {string} text - User message
  * @returns {string|null} URL if found, null otherwise
  */
-export function extractUrl(text) {
+function extractUrl(text) {
 	const urlMatch = text.match(/https?:\/\/[^\s]+/);
 	return urlMatch ? urlMatch[0] : null;
 }
@@ -66,7 +72,7 @@ export function extractUrl(text) {
  * @param {string} currentUrl - Current page URL for context
  * @returns {Promise<{intent: string, url?: string, confidence: string, reasoning: string}>}
  */
-export async function detectIntentWithLLM(text, currentUrl) {
+async function detectIntentWithLLM(text, currentUrl) {
 	const systemPrompt = `You are an intent classifier for a web assistant. Classify user messages into one of three intents:
 
 1. "simple" - Questions about the current page, requests to summarize/explain content, or general questions that can be answered with the current page context.
@@ -75,7 +81,7 @@ export async function detectIntentWithLLM(text, currentUrl) {
 
 3. "agent" - Requests to perform actions on websites: sign up, register, fill forms, create accounts, make purchases, log in, submit applications, etc. These require browser automation.
 
-If the intent is "agent", also provide the target URL. If no URL is in the message, infer it from context (e.g., "ABC Power" → likely "https://www.abcpower.com" or similar).
+If the intent is "agent", also provide the target URL. If no URL is in the message, infer it from context (e.g., "ABC Power" -> likely "https://www.abcpower.com" or similar).
 
 Respond in JSON format:
 {
@@ -92,33 +98,12 @@ User message: "${text}"
 Classify this intent.`;
 
 	try {
-		const response = await fetch(`${SERVER_BASE}/api/openai/chat`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				model: 'gpt-4o-mini',  // Fast model for intent detection
-				messages: [
-					{ role: 'system', content: systemPrompt },
-					{ role: 'user', content: userPrompt }
-				]
-			})
-		});
+		const content = await callLLMForContent(INTENT_MODEL, [
+			{ role: 'system', content: systemPrompt },
+			{ role: 'user', content: userPrompt }
+		], { provider: 'openai' });
 
-		if (!response.ok) {
-			throw new Error(`Intent detection failed: ${response.status}`);
-		}
-
-		const data = await response.json();
-		const content = data.choices?.[0]?.message?.content || '';
-
-		// Parse JSON from response (handle markdown code blocks)
-		let jsonStr = content;
-		const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-		if (jsonMatch) {
-			jsonStr = jsonMatch[1];
-		}
-
-		const result = JSON.parse(jsonStr.trim());
+		const result = parseJsonFromLLM(content);
 		return {
 			intent: result.intent || INTENT.SIMPLE,
 			url: result.url || null,
@@ -164,8 +149,7 @@ export async function detectIntent(text, currentUrl) {
 	}
 
 	// Has explicit URL + action words = likely agent task
-	const hasActionVerb = /(sign up|signup|register|fill out|fill in|apply|book|order|buy|purchase|create account|log in|login|submit|enroll|subscribe|checkout|check out)/.test(text.toLowerCase());
-	if (explicitUrl && hasActionVerb) {
+	if (explicitUrl && ACTION_VERB_PATTERN.test(text.toLowerCase())) {
 		return {
 			intent: INTENT.AGENT,
 			url: explicitUrl,

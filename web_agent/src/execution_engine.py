@@ -1,15 +1,111 @@
 """JavaScript validation and execution engine"""
 
 import re
-import sys
 import time
 from typing import Tuple, Dict, Any, List, Optional
 from src.browser import BrowserManager
 from src.config import config
 
+# JavaScript snippets for DOM operations
+JS_FILL_FIELD = """
+(args) => {
+    const element = document.querySelector(args.selector);
+    if (!element) {
+        throw new Error(`Element not found: ${args.selector}`);
+    }
+    element.value = args.value;
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+}
+"""
+
+JS_CLICK_BUTTON = """
+(selector) => {
+    const element = document.querySelector(selector);
+    if (!element) {
+        throw new Error(`Button not found: ${selector}`);
+    }
+    element.click();
+}
+"""
+
+JS_SELECT_OPTION = """
+(args) => {
+    const element = document.querySelector(args.selector);
+    if (!element) {
+        throw new Error(`Select element not found: ${args.selector}`);
+    }
+    element.value = args.value;
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+}
+"""
+
+JS_CHECK_CHECKBOX = """
+(args) => {
+    const element = document.querySelector(args.selector);
+    if (!element) {
+        throw new Error(`Checkbox not found: ${args.selector}`);
+    }
+    element.checked = args.checked;
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+}
+"""
+
+JS_SELECT_RADIO = """
+(args) => {
+    const selector = `input[type="radio"][name="${args.name}"][value="${args.value}"]`;
+    const element = document.querySelector(selector);
+    if (!element) {
+        throw new Error(`Radio button not found: name="${args.name}" value="${args.value}"`);
+    }
+    element.checked = true;
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    element.dispatchEvent(new Event('click', { bubbles: true }));
+}
+"""
+
+JS_WAIT_FOR_ELEMENT = """
+async (args) => {
+    const startTime = Date.now();
+    while (Date.now() - startTime < args.timeout) {
+        if (document.querySelector(args.selector)) {
+            return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error(`Timeout waiting for element: ${args.selector}`);
+}
+"""
+
 
 class ExecutionEngine:
     """Validates and executes generated JavaScript code"""
+
+    # Compiled regex patterns for operation parsing
+    _OP_PATTERNS = [
+        (re.compile(r"await\s+fillField\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]*?)['\"]\s*\)"), "fillField"),
+        (re.compile(r"await\s+clickButton\s*\(\s*(?:'([^']*)'|\"([^\"]*)\")\s*\)"), "clickButton"),
+        (re.compile(r"await\s+selectOption\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]*?)['\"]\s*\)"), "selectOption"),
+        (re.compile(r"await\s+selectRadio\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]*?)['\"]\s*\)"), "selectRadio"),
+        (re.compile(r"await\s+checkCheckbox\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*(true|false)\s*\)"), "checkCheckbox"),
+        (re.compile(r"await\s+waitForElement\s*\(\s*['\"]([^'\"]+)['\"]\s*(?:,\s*(\d+))?\s*\)"), "waitForElement"),
+    ]
+
+    # Compiled regex patterns for code validation
+    _DANGEROUS_PATTERNS = [
+        (re.compile(r'\beval\s*\('), "eval() not allowed"),
+        (re.compile(r'\bFunction\s*\('), "Function constructor not allowed"),
+        (re.compile(r'\bfetch\s*\('), "fetch() not allowed"),
+        (re.compile(r'\bXMLHttpRequest\b'), "XMLHttpRequest not allowed"),
+        (re.compile(r'window\.open\s*\('), "window.open() not allowed"),
+        (re.compile(r'location\.href\s*='), "location.href assignment not allowed"),
+        (re.compile(r'document\.write\s*\('), "document.write() not allowed"),
+        (re.compile(r'\.innerHTML\s*='), "innerHTML assignment not allowed"),
+    ]
+
+    _FUNCTION_CALL_PATTERN = re.compile(r'\b(\w+)\s*\(')
+
+    _SUBMIT_CLICK_PATTERN = re.compile(r"await\s+clickButton\s*\(\s*(?:'([^']*)'|\"([^\"]*)\")\s*\)\s*;?")
 
     def __init__(self, browser: BrowserManager):
         """Initialize execution engine
@@ -25,85 +121,27 @@ class ExecutionEngine:
 
     async def _fill_field(self, selector: str, value: str) -> None:
         """Fill a form field with a value"""
-        await self.browser.page.evaluate("""
-            (args) => {
-                const element = document.querySelector(args.selector);
-                if (!element) {
-                    throw new Error(`Element not found: ${args.selector}`);
-                }
-                element.value = args.value;
-                element.dispatchEvent(new Event('input', { bubbles: true }));
-                element.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        """, {"selector": selector, "value": value})
+        await self.browser.page.evaluate(JS_FILL_FIELD, {"selector": selector, "value": value})
 
     async def _click_button(self, selector: str) -> None:
         """Click a button"""
-        await self.browser.page.evaluate("""
-            (selector) => {
-                const element = document.querySelector(selector);
-                if (!element) {
-                    throw new Error(`Button not found: ${selector}`);
-                }
-                element.click();
-            }
-        """, selector)
+        await self.browser.page.evaluate(JS_CLICK_BUTTON, selector)
 
     async def _select_option(self, selector: str, value: str) -> None:
         """Select a dropdown option"""
-        await self.browser.page.evaluate("""
-            (args) => {
-                const element = document.querySelector(args.selector);
-                if (!element) {
-                    throw new Error(`Select element not found: ${args.selector}`);
-                }
-                element.value = args.value;
-                element.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        """, {"selector": selector, "value": value})
+        await self.browser.page.evaluate(JS_SELECT_OPTION, {"selector": selector, "value": value})
 
     async def _check_checkbox(self, selector: str, checked: bool) -> None:
         """Toggle a checkbox"""
-        await self.browser.page.evaluate("""
-            (args) => {
-                const element = document.querySelector(args.selector);
-                if (!element) {
-                    throw new Error(`Checkbox not found: ${args.selector}`);
-                }
-                element.checked = args.checked;
-                element.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        """, {"selector": selector, "checked": checked})
+        await self.browser.page.evaluate(JS_CHECK_CHECKBOX, {"selector": selector, "checked": checked})
 
     async def _select_radio(self, name: str, value: str) -> None:
         """Select a radio button by name and value"""
-        await self.browser.page.evaluate("""
-            (args) => {
-                const selector = `input[type="radio"][name="${args.name}"][value="${args.value}"]`;
-                const element = document.querySelector(selector);
-                if (!element) {
-                    throw new Error(`Radio button not found: name="${args.name}" value="${args.value}"`);
-                }
-                element.checked = true;
-                element.dispatchEvent(new Event('change', { bubbles: true }));
-                element.dispatchEvent(new Event('click', { bubbles: true }));
-            }
-        """, {"name": name, "value": value})
+        await self.browser.page.evaluate(JS_SELECT_RADIO, {"name": name, "value": value})
 
     async def _wait_for_element(self, selector: str, timeout: int = 5000) -> None:
         """Wait for an element to appear"""
-        await self.browser.page.evaluate("""
-            async (args) => {
-                const startTime = Date.now();
-                while (Date.now() - startTime < args.timeout) {
-                    if (document.querySelector(args.selector)) {
-                        return;
-                    }
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                }
-                throw new Error(`Timeout waiting for element: ${args.selector}`);
-            }
-        """, {"selector": selector, "timeout": timeout})
+        await self.browser.page.evaluate(JS_WAIT_FOR_ELEMENT, {"selector": selector, "timeout": timeout})
 
     # ========== Code Parsing ==========
 
@@ -116,21 +154,10 @@ class ExecutionEngine:
         Returns:
             List of operation dicts with type and arguments
         """
-        # Patterns for each operation type
-        # clickButton uses alternation to handle selectors with embedded quotes
-        patterns = [
-            (r"await\s+fillField\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]*?)['\"]\s*\)", "fillField"),
-            (r"await\s+clickButton\s*\(\s*(?:'([^']*)'|\"([^\"]*)\")\s*\)", "clickButton"),
-            (r"await\s+selectOption\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]*?)['\"]\s*\)", "selectOption"),
-            (r"await\s+selectRadio\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]*?)['\"]\s*\)", "selectRadio"),
-            (r"await\s+checkCheckbox\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*(true|false)\s*\)", "checkCheckbox"),
-            (r"await\s+waitForElement\s*\(\s*['\"]([^'\"]+)['\"]\s*(?:,\s*(\d+))?\s*\)", "waitForElement"),
-        ]
-
         # Find all matches with positions
         all_matches = []
-        for pattern, op_type in patterns:
-            for match in re.finditer(pattern, code):
+        for pattern, op_type in self._OP_PATTERNS:
+            for match in pattern.finditer(code):
                 all_matches.append((match.start(), op_type, match))
 
         # Sort by position to preserve execution order
@@ -195,19 +222,8 @@ class ExecutionEngine:
             (is_valid, error_message)
         """
         # Check for dangerous patterns
-        dangerous_patterns = [
-            (r'\beval\s*\(', "eval() not allowed"),
-            (r'\bFunction\s*\(', "Function constructor not allowed"),
-            (r'\bfetch\s*\(', "fetch() not allowed"),
-            (r'\bXMLHttpRequest\b', "XMLHttpRequest not allowed"),
-            (r'window\.open\s*\(', "window.open() not allowed"),
-            (r'location\.href\s*=', "location.href assignment not allowed"),
-            (r'document\.write\s*\(', "document.write() not allowed"),
-            (r'\.innerHTML\s*=', "innerHTML assignment not allowed"),
-        ]
-
-        for pattern, error_msg in dangerous_patterns:
-            if re.search(pattern, code):
+        for pattern, error_msg in self._DANGEROUS_PATTERNS:
+            if pattern.search(code):
                 return False, f"Dangerous operation detected: {error_msg}"
 
         # Check for async function structure
@@ -219,7 +235,7 @@ class ExecutionEngine:
             return False, "Generated code exceeds maximum length (5000 chars)"
 
         # Extract function calls and verify they're allowed
-        function_calls = re.findall(r'\b(\w+)\s*\(', code)
+        function_calls = self._FUNCTION_CALL_PATTERN.findall(code)
 
         # Allowed functions (API + standard JS)
         allowed = set(config.ALLOWED_APIS + [
@@ -233,86 +249,6 @@ class ExecutionEngine:
         # If all checks pass
         return True, None
 
-    async def inject_api_functions(self) -> None:
-        """Inject helper API functions into browser page context using exposeFunction
-
-        Injects:
-        - fillField(selector, value)
-        - clickButton(selector)
-        - selectOption(selector, value)
-        - checkCheckbox(selector, checked)
-        - waitForElement(selector, timeout)
-        """
-        # Define Python implementations of helper functions
-        async def fill_field(selector: str, value: str) -> None:
-            await self.browser.page.evaluate("""
-                (args) => {
-                    const element = document.querySelector(args.selector);
-                    if (!element) {
-                        throw new Error(`Element not found: ${args.selector}`);
-                    }
-                    element.value = args.value;
-                    element.dispatchEvent(new Event('input', { bubbles: true }));
-                    element.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            """, {"selector": selector, "value": value})
-
-        async def click_button(selector: str) -> None:
-            await self.browser.page.evaluate("""
-                (selector) => {
-                    const element = document.querySelector(selector);
-                    if (!element) {
-                        throw new Error(`Button not found: ${selector}`);
-                    }
-                    element.click();
-                }
-            """, selector)
-
-        async def select_option(selector: str, value: str) -> None:
-            await self.browser.page.evaluate("""
-                (args) => {
-                    const element = document.querySelector(args.selector);
-                    if (!element) {
-                        throw new Error(`Select element not found: ${args.selector}`);
-                    }
-                    element.value = args.value;
-                    element.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            """, {"selector": selector, "value": value})
-
-        async def check_checkbox(selector: str, checked: bool) -> None:
-            await self.browser.page.evaluate("""
-                (args) => {
-                    const element = document.querySelector(args.selector);
-                    if (!element) {
-                        throw new Error(`Checkbox not found: ${args.selector}`);
-                    }
-                    element.checked = args.checked;
-                    element.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            """, {"selector": selector, "checked": checked})
-
-        async def wait_for_element(selector: str, timeout: int = 5000) -> None:
-            await self.browser.page.evaluate("""
-                async (args) => {
-                    const startTime = Date.now();
-                    while (Date.now() - startTime < args.timeout) {
-                        if (document.querySelector(args.selector)) {
-                            return;
-                        }
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                    }
-                    throw new Error(`Timeout waiting for element: ${args.selector}`);
-                }
-            """, {"selector": selector, "timeout": timeout})
-
-        # Expose functions to page context
-        await self.browser.page.expose_function("fillField", fill_field)
-        await self.browser.page.expose_function("clickButton", click_button)
-        await self.browser.page.expose_function("selectOption", select_option)
-        await self.browser.page.expose_function("checkCheckbox", check_checkbox)
-        await self.browser.page.expose_function("waitForElement", wait_for_element)
-
     def extract_submit_click(self, code: str) -> Tuple[str, Optional[str]]:
         """Extract last clickButton call (likely submit) from generated code
 
@@ -324,8 +260,7 @@ class ExecutionEngine:
         """
         # Find all clickButton calls
         # Handle both 'selector' and "selector" (selector may contain opposite quote type)
-        pattern = r"await\s+clickButton\s*\(\s*(?:'([^']*)'|\"([^\"]*)\")\s*\)\s*;?"
-        matches = list(re.finditer(pattern, code))
+        matches = list(self._SUBMIT_CLICK_PATTERN.finditer(code))
 
         if not matches:
             return code, None

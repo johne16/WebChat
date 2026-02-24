@@ -1,7 +1,7 @@
 // extension/agentClient.js
 // Client for communicating with the web agent through the server proxy
 
-const SERVER_BASE = 'http://localhost:8787';
+import { SERVER_BASE } from './config.js';
 
 // =============================================================================
 // SSE (Server-Sent Events) for Real-Time Updates
@@ -128,6 +128,19 @@ export function isSSEConnected() {
 // =============================================================================
 
 /**
+ * Safely parse JSON from a response, wrapping in try/catch to avoid masking HTTP errors
+ * @param {Response} response - Fetch response
+ * @returns {Promise<Object>} Parsed JSON
+ */
+async function safeResponseJson(response) {
+	try {
+		return await response.json();
+	} catch {
+		return { error: `HTTP ${response.status}: failed to parse response body` };
+	}
+}
+
+/**
  * Start a new agent process
  * @param {string} taskId - Unique task identifier
  * @returns {Promise<{success: boolean, port: number, taskId: string}>}
@@ -146,7 +159,7 @@ export async function startAgent(taskId) {
 	});
 
 	if (!response.ok) {
-		const error = await response.json();
+		const error = await safeResponseJson(response);
 		throw new Error(error.error || `Failed to start agent: ${response.status}`);
 	}
 
@@ -181,7 +194,7 @@ export async function executeGoal(port, goal, startUrl, userProfile, options = {
 	});
 
 	if (!response.ok) {
-		const error = await response.json();
+		const error = await safeResponseJson(response);
 		throw new Error(error.error || `Execute goal failed: ${response.status}`);
 	}
 
@@ -211,7 +224,7 @@ export async function continueSession(port, sessionId, additionalData = {}) {
 	});
 
 	if (!response.ok) {
-		const error = await response.json();
+		const error = await safeResponseJson(response);
 		throw new Error(error.error || `Continue session failed: ${response.status}`);
 	}
 
@@ -235,7 +248,7 @@ export async function stopAgent(port) {
 	});
 
 	if (!response.ok) {
-		const error = await response.json();
+		const error = await safeResponseJson(response);
 		throw new Error(error.error || `Stop agent failed: ${response.status}`);
 	}
 
@@ -243,9 +256,6 @@ export async function stopAgent(port) {
 	console.log('[AgentClient] Agent stopped');
 	return data;
 }
-
-// Alias for backwards compatibility
-export const stopAgentContainer = stopAgent;
 
 /**
  * Get list of running agents
@@ -255,7 +265,7 @@ export async function getAgentStatus() {
 	const response = await fetch(`${SERVER_BASE}/api/agent/status`);
 
 	if (!response.ok) {
-		const error = await response.json();
+		const error = await safeResponseJson(response);
 		throw new Error(error.error || `Get status failed: ${response.status}`);
 	}
 
@@ -279,7 +289,7 @@ export async function provideInput(port, sessionId, inputData) {
 	});
 
 	if (!response.ok) {
-		const error = await response.json();
+		const error = await safeResponseJson(response);
 		throw new Error(error.error || `Provide input failed: ${response.status}`);
 	}
 
@@ -288,17 +298,3 @@ export async function provideInput(port, sessionId, inputData) {
 	return data;
 }
 
-/**
- * Get current needs_input queue
- * @returns {Promise<{queue: Array}>}
- */
-export async function getNeedsInputQueue() {
-	const response = await fetch(`${SERVER_BASE}/api/agent/needs-input`);
-
-	if (!response.ok) {
-		const error = await response.json();
-		throw new Error(error.error || `Get queue failed: ${response.status}`);
-	}
-
-	return response.json();
-}

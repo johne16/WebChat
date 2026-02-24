@@ -108,28 +108,6 @@ def test_validate_unauthorized_function():
 
 
 @pytest.mark.asyncio
-async def test_inject_api_functions():
-    """Test API functions are injected into page using expose_function"""
-    browser = MagicMock()
-    browser.page.expose_function = AsyncMock()
-
-    engine = ExecutionEngine(browser)
-
-    await engine.inject_api_functions()
-
-    # Verify expose_function was called for each helper function
-    assert browser.page.expose_function.call_count == 5
-
-    # Verify all required functions were exposed
-    call_names = [call[0][0] for call in browser.page.expose_function.call_args_list]
-    assert "fillField" in call_names
-    assert "clickButton" in call_names
-    assert "selectOption" in call_names
-    assert "checkCheckbox" in call_names
-    assert "waitForElement" in call_names
-
-
-@pytest.mark.asyncio
 async def test_execute_success():
     """Test successful code execution"""
     browser = MagicMock()

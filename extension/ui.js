@@ -4,6 +4,7 @@
 const log = document.getElementById('log');
 const stickyBanner = document.getElementById('sticky-banner');
 const bannerMessage = document.getElementById('banner-message');
+const headerProgress = document.getElementById('header-progress');
 
 let currentInlineForm = null;
 
@@ -24,33 +25,49 @@ export function addMessage(role, text) {
 }
 
 /**
- * Add a research step message (blue themed)
+ * Add a step message with a prefix icon
  * @param {string} stepText - Step description
+ * @param {string} prefix - Emoji/icon prefix (default: research icon)
  */
-export function addStepMessage(stepText) {
+export function addStepMessage(stepText, prefix = '\uD83D\uDD0D') {
 	const row = document.createElement('div');
 	row.className = 'row step';
 	const bubble = document.createElement('div');
 	bubble.className = 'msg step';
-	bubble.textContent = `🔍 ${stepText}`;
+	bubble.textContent = `${prefix} ${stepText}`;
 	row.appendChild(bubble);
 	log.appendChild(row);
 	log.scrollTop = log.scrollHeight;
 }
 
+
 /**
- * Add an agent step message
- * @param {string} stepText - Step description
+ * Update header progress indicator text
+ * @param {string} text - Progress text to display, or empty string to hide
  */
-export function addAgentStepMessage(stepText) {
-	const row = document.createElement('div');
-	row.className = 'row step';
-	const bubble = document.createElement('div');
-	bubble.className = 'msg step';
-	bubble.textContent = `🤖 ${stepText}`;
-	row.appendChild(bubble);
-	log.appendChild(row);
-	log.scrollTop = log.scrollHeight;
+export function updateHeaderProgress(text) {
+	if (!headerProgress) return;
+	if (text) {
+		headerProgress.textContent = text;
+		headerProgress.hidden = false;
+		// Trigger reflow so the transition fires after hidden is removed
+		headerProgress.offsetWidth;
+		headerProgress.classList.add('visible');
+	} else {
+		headerProgress.classList.remove('visible');
+		// Hide element after fade-out transition
+		const onEnd = () => {
+			headerProgress.hidden = true;
+			headerProgress.textContent = '';
+			headerProgress.removeEventListener('transitionend', onEnd);
+		};
+		headerProgress.addEventListener('transitionend', onEnd);
+		// Fallback if transition doesn't fire (already hidden, etc.)
+		setTimeout(() => {
+			headerProgress.hidden = true;
+			headerProgress.textContent = '';
+		}, 300);
+	}
 }
 
 /**
@@ -177,4 +194,84 @@ export function addMetaMessage(text) {
 	meta.className = 'meta';
 	meta.textContent = text;
 	log.appendChild(meta);
+}
+
+// =============================================================================
+// Password Modal
+// =============================================================================
+
+const passwordModal = document.getElementById('password-modal');
+const modalPassphrase = document.getElementById('modal-passphrase');
+const modalCancel = document.getElementById('modal-cancel');
+const modalSubmit = document.getElementById('modal-submit');
+
+/**
+ * Show the password modal and focus the input
+ */
+export function showPasswordModal() {
+	passwordModal.classList.add('visible');
+	modalPassphrase.value = '';
+	modalPassphrase.focus();
+}
+
+/**
+ * Hide the password modal and clear the input
+ */
+export function hidePasswordModal() {
+	passwordModal.classList.remove('visible');
+	modalPassphrase.value = '';
+}
+
+/**
+ * Register callbacks for password modal interactions
+ * @param {Object} callbacks - { onSubmit, onCancel }
+ */
+export function onPasswordModal({ onSubmit, onCancel }) {
+	modalCancel.addEventListener('click', () => {
+		hidePasswordModal();
+		if (onCancel) onCancel();
+	});
+
+	modalSubmit.addEventListener('click', async () => {
+		const passphrase = modalPassphrase.value;
+		if (!passphrase) return;
+		if (onSubmit) await onSubmit(passphrase);
+	});
+
+	modalPassphrase.addEventListener('keydown', (e) => {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			modalSubmit.click();
+		}
+	});
+}
+
+// =============================================================================
+// Stop Agent Button
+// =============================================================================
+
+const stopAgentBtn = document.getElementById('stop-agent-btn');
+
+/**
+ * Show the stop agent button
+ */
+export function showStopButton() {
+	stopAgentBtn.hidden = false;
+}
+
+/**
+ * Hide the stop agent button
+ */
+export function hideStopButton() {
+	stopAgentBtn.hidden = true;
+}
+
+/**
+ * Register click handler for the stop agent button
+ * @param {Function} handler - Async click handler
+ */
+export function onStopAgentClick(handler) {
+	stopAgentBtn.addEventListener('click', async () => {
+		await handler();
+	});
 }

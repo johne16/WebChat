@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
+from src.config import GoalStatus
 
 
 @dataclass
@@ -40,7 +41,7 @@ class SessionMemory:
         self.db_path = db_path or self.DEFAULT_DB_PATH
         self.session_id = session_id or str(uuid.uuid4())
         self.goal: str = ""
-        self.status: str = "in_progress"  # "in_progress", "achieved", "failed"
+        self.status: str = GoalStatus.IN_PROGRESS
         self.current_url: str = ""
         self.current_step: int = 0
         self.created_at: datetime = datetime.now()
@@ -131,30 +132,18 @@ class SessionMemory:
         ))
 
         # Save memory entries
-        cursor.execute("""
-            INSERT OR REPLACE INTO memory (session_id, key, value)
-            VALUES (?, ?, ?)
-        """, (self.session_id, "entered_data", json.dumps(self._entered_data)))
-
-        cursor.execute("""
-            INSERT OR REPLACE INTO memory (session_id, key, value)
-            VALUES (?, ?, ?)
-        """, (self.session_id, "extracted_info", json.dumps(self._extracted_info)))
-
-        cursor.execute("""
-            INSERT OR REPLACE INTO memory (session_id, key, value)
-            VALUES (?, ?, ?)
-        """, (self.session_id, "visited_urls", json.dumps(self._visited_urls)))
-
-        cursor.execute("""
-            INSERT OR REPLACE INTO memory (session_id, key, value)
-            VALUES (?, ?, ?)
-        """, (self.session_id, "user_profile", json.dumps(self._user_profile)))
-
-        cursor.execute("""
-            INSERT OR REPLACE INTO memory (session_id, key, value)
-            VALUES (?, ?, ?)
-        """, (self.session_id, "missing_fields", json.dumps(self._missing_fields)))
+        memory_entries = {
+            "entered_data": self._entered_data,
+            "extracted_info": self._extracted_info,
+            "visited_urls": self._visited_urls,
+            "user_profile": self._user_profile,
+            "missing_fields": self._missing_fields,
+        }
+        for key, value in memory_entries.items():
+            cursor.execute("""
+                INSERT OR REPLACE INTO memory (session_id, key, value)
+                VALUES (?, ?, ?)
+            """, (self.session_id, key, json.dumps(value)))
 
         # Save action history
         for action in self._action_history:
@@ -200,7 +189,7 @@ class SessionMemory:
 
         self.session_id = session_id
         self.goal = row[0] or ""
-        self.status = row[1] or "in_progress"
+        self.status = row[1] or GoalStatus.IN_PROGRESS
         self.current_url = row[2] or ""
         self.current_step = row[3] or 0
         self.created_at = datetime.fromisoformat(row[4]) if row[4] else datetime.now()
@@ -329,29 +318,81 @@ class SessionMemory:
             ]
         }
 
+    def format_context_for_llm(self) -> str:
+        """Format memory context as a pre-formatted string for LLM planning prompts
+
+        Returns:
+            Formatted string with session memory details
+        """
+        sections = [
+            "## Session Memory",
+            f"Entered Data: {json.dumps(self._entered_data)}",
+            f"Visited URLs: {json.dumps(self._visited_urls)}",
+            f"Current Step: {self.current_step}",
+        ]
+
+        recent_actions = [
+            {
+                "step": a.step,
+                "action": a.action_type,
+                "success": a.success
+            }
+            for a in self._action_history[-5:]
+        ]
+
+        if recent_actions:
+            sections.append("\nRecent Actions:")
+            for action in recent_actions:
+                status = "OK" if action.get('success') else "FAIL"
+                sections.append(f"  [{status}] Step {action.get('step')}: {action.get('action')}")
+
+        return "\n".join(sections)
+
     @property
     def entered_data(self) -> Dict[str, str]:
-        """Get all entered data"""
+        """Get all entered data (returns copy for safety)"""
         return self._entered_data.copy()
 
     @property
     def visited_urls(self) -> List[str]:
-        """Get all visited URLs"""
+        """Get all visited URLs (returns copy for safety)"""
         return self._visited_urls.copy()
 
     @property
     def action_history(self) -> List[ActionRecord]:
-        """Get full action history"""
+        """Get full action history (returns copy for safety)"""
         return self._action_history.copy()
+
+    def iter_action_history(self):
+        """Iterate over action history without copying"""
+        return iter(self._action_history)
+
+    def format_action_history(self) -> List[Dict[str, Any]]:
+        """Format action history for serialization without copying
+
+        Returns:
+            List of formatted action dicts
+        """
+        return [
+            {
+                "step": action.step,
+                "action": action.action_type,
+                "params": action.params,
+                "success": action.success,
+                "result": action.result,
+                "timestamp": action.timestamp.isoformat()
+            }
+            for action in self._action_history
+        ]
 
     @property
     def user_profile(self) -> Dict[str, Any]:
-        """Get stored user profile"""
+        """Get stored user profile (returns copy for safety)"""
         return self._user_profile.copy()
 
     @property
     def missing_fields(self) -> List[str]:
-        """Get list of missing fields requested by agent"""
+        """Get list of missing fields requested by agent (returns copy for safety)"""
         return self._missing_fields.copy()
 
     def set_user_profile(self, profile: Dict[str, Any]) -> None:

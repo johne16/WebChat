@@ -1,15 +1,21 @@
 """Autonomous Web Agent - Goal-driven web automation orchestrator"""
 
+import logging
 import time
 import httpx
+from datetime import datetime
 from typing import Dict, Any, Optional, List
 from src.browser import BrowserManager
 from src.llm import LLMClient
 from src.execution_engine import ExecutionEngine
 from src.action_executor import ActionExecutor
 from src.memory import SessionMemory, ActionRecord
-from src.config import config
+from src.config import config, GoalStatus
+from src.metrics import MetricsLogger
 from pathlib import Path
+
+
+logger = logging.getLogger(__name__)
 
 
 class AutonomousWebAgent:
@@ -57,11 +63,22 @@ class AutonomousWebAgent:
         self.callback_url = callback_url
         self.port = port
         self.task_id = task_id
+        self._http_client: Optional[httpx.AsyncClient] = None
 
         # Tracking
         self.total_tokens = 0
         self.start_time: Optional[float] = None
+        self._should_close_browser = True
 
+        # Per-step metrics collection (consumed by metrics logger in step 5d)
+        self._step_metrics: List[Dict[str, Any]] = []
+        self._wasted_failures: int = 0
+        self._wasted_retries: int = 0
+        self._wasted_redundant: int = 0
+        self._metrics: Optional[MetricsLogger] = None
+
+    # NOTE: If additional notification channels are needed (e.g., WebSocket, logging service),
+    # consider refactoring webhook calls to an event/observer pattern.
     async def _send_webhook(self, status: str, message: Optional[str] = None,
                             missing_fields: Optional[List[str]] = None,
                             data: Optional[Dict[str, Any]] = None) -> None:
@@ -87,13 +104,14 @@ class AutonomousWebAgent:
         }
 
         try:
-            async with httpx.AsyncClient() as client:
-                await client.post(self.callback_url, json=payload, timeout=5.0)
+            if self._http_client is None:
+                self._http_client = httpx.AsyncClient()
+            await self._http_client.post(self.callback_url, json=payload, timeout=5.0)
             if config.DEBUG:
-                print(f"[WEBHOOK] Sent status={status} to {self.callback_url}")
+                logger.debug(f"[WEBHOOK] Sent status={status} to {self.callback_url}")
         except Exception as e:
             if config.DEBUG:
-                print(f"[WEBHOOK] Failed to send: {e}")
+                logger.debug(f"[WEBHOOK] Failed to send: {e}")
 
     async def execute_goal(
         self,
@@ -129,23 +147,33 @@ class AutonomousWebAgent:
         max_steps = options.get("max_steps", config.MAX_AGENT_STEPS)
         errors: List[Dict[str, Any]] = []
 
-        # Track whether to close browser at end (keep open for awaiting_user_action, needs_input)
+        # Reset per-goal metrics
+        self._step_metrics = []
+        self._wasted_failures = 0
+        self._wasted_retries = 0
+        self._wasted_redundant = 0
+
+        # Apply headless option if provided (overrides config default)
+        if "headless" in options:
+            self.browser.headless = options["headless"]
+
+        # Reset browser close flag (keep open for awaiting_user_action, needs_input)
         self._should_close_browser = True
+
+        # Initialize metrics logger for this goal execution
+        self._metrics = MetricsLogger(self.memory.session_id)
 
         # Store goal and user profile in memory
         self.memory.goal = goal
-        self.memory.status = "in_progress"
+        self.memory.status = GoalStatus.IN_PROGRESS
 
-        # Send webhook: execution started
-        await self._send_webhook("started", f"Starting goal: {goal[:100]}")
-
-        # Store or merge user profile
-        if self.memory.user_profile:
-            # Resuming session - merge any new data into stored profile
+        # Store or merge user profile; detect resume to suppress duplicate "Starting goal" message
+        is_resume = self.memory.user_profile is not None
+        if is_resume:
             self.memory.update_user_profile(user_profile)
         else:
-            # New session - store full profile
             self.memory.set_user_profile(user_profile)
+            await self._send_webhook(GoalStatus.STARTED, f"Starting goal: {goal[:100]}")
 
         try:
             # Launch browser
@@ -171,14 +199,15 @@ class AutonomousWebAgent:
                 if current_url not in self.memory.visited_urls:
                     self.memory.add_visited_url(current_url)
                 if config.DEBUG:
-                    print(f"[AGENT] Resuming at current URL: {current_url}")
+                    logger.debug(f"[AGENT] Resuming at current URL: {current_url}")
             else:
                 # New session - navigate to start URL
-                if not await self.browser.navigate(start_url):
+                nav_result = await self.browser.navigate(start_url)
+                if not nav_result["success"]:
                     return self._build_response(
                         success=False,
                         goal_achieved=False,
-                        errors=[{"type": "navigation_error", "message": f"Failed to navigate to {start_url}"}]
+                        errors=[nav_result["error"]]
                     )
                 self.memory.add_visited_url(start_url)
                 self.memory.current_url = start_url
@@ -189,196 +218,117 @@ class AutonomousWebAgent:
 
             while step < max_steps:
                 step += 1
+                step_start = time.perf_counter()
+
+                # Track previous action for retry detection
+                prev_action = None
+                prev_params = None
+                if self._step_metrics:
+                    prev_metric = self._step_metrics[-1]
+                    prev_action = prev_metric["action"]
+                    prev_params = prev_metric.get("_params")
+
+                # Snapshot visited URLs before this step for redundant navigation detection
+                urls_before_step = set(self.memory.visited_urls)
 
                 if config.DEBUG:
-                    print(f"\n{'='*60}")
-                    print(f"[AGENT] Step {step}/{max_steps}")
-                    print(f"[AGENT] Current URL: {self.browser.page.url}")
+                    logger.debug(f"{'='*60}")
+                    logger.debug(f"[AGENT] Step {step}/{max_steps}")
+                    logger.debug(f"[AGENT] Current URL: {self.browser.page.url}")
 
                 # 1. Build page context for LLM
-                page_context = await self._build_page_context()
+                page_context_result = await self.browser.build_page_context()
+                page_context = page_context_result["context"]
+                page_extraction_time = page_context_result["timings"]["pageExtraction"]
+                page_context_size = page_context_result["pageContextSize"]
 
                 if config.DEBUG:
+                    logger.debug(f"[AGENT] Page extraction: {page_extraction_time:.3f}s, context size: {page_context_size} chars")
                     # Print forms section to verify radio button state
                     if "## Forms" in page_context:
                         forms_start = page_context.find("## Forms")
                         forms_end = page_context.find("##", forms_start + 10)
                         forms_section = page_context[forms_start:forms_end] if forms_end > 0 else page_context[forms_start:]
-                        print(f"[AGENT] Page forms:\n{forms_section[:1000]}")
+                        logger.debug(f"[AGENT] Page forms:\n{forms_section[:1000]}")
 
                 # 2. Ask LLM for next action (use stored profile which includes merged data)
                 plan = await self.llm.generate_plan(
                     goal=goal,
                     page_context=page_context,
-                    memory_context=self.memory.get_context_for_llm(),
+                    memory_context=self.memory.format_context_for_llm(),
                     user_profile=self.memory.user_profile
                 )
 
                 self.total_tokens += plan.get("tokens_used", 0)
+                planning_time = plan.get("planning_time", 0)
 
                 if config.DEBUG:
-                    print(f"[AGENT] LLM decided: {plan['action']}")
-                    print(f"[AGENT] Reasoning: {plan['reasoning']}")
-                    print(f"[AGENT] Goal status: {plan['goal_status']}")
+                    logger.debug(f"[AGENT] LLM decided: {plan['action']}")
+                    logger.debug(f"[AGENT] Reasoning: {plan['reasoning']}")
+                    logger.debug(f"[AGENT] Goal status: {plan['goal_status']}")
 
                 # 3. Check if goal achieved or blocked
-                if plan["goal_status"] == "achieved":
-                    self.memory.status = "achieved"
-                    self.memory.save()
+                terminal_response = await self._check_goal_status(plan, errors)
+                if terminal_response is not None:
+                    return terminal_response
 
-                    # Close browser on terminal state
-                    self._should_close_browser = True
+                # 4. Execute action and record in memory
+                consecutive_failures, should_abort, result = await self._execute_and_record_step(
+                    step, plan, errors, consecutive_failures
+                )
 
-                    # Send webhook: goal achieved
-                    await self._send_webhook("achieved", "Goal completed successfully")
+                # 5. Collect per-step metrics
+                step_total_time = time.perf_counter() - step_start
 
-                    return self._build_response(
-                        success=True,
-                        goal_achieved=True,
-                        errors=errors
-                    )
+                step_metric = {
+                    "type": "step",
+                    "sessionId": self.memory.session_id,
+                    "step": step,
+                    "timestamp": datetime.now().isoformat(),
+                    "action": plan["action"],
+                    "success": result.success,
+                    "goalStatus": plan["goal_status"],
+                    "timings": {
+                        "pageExtraction": page_extraction_time,
+                        "llmPlanning": planning_time,
+                        "actionExecution": result.execution_time,
+                        "navigationWait": result.navigation_wait_time,
+                        "stepTotal": step_total_time
+                    },
+                    "tokens": plan.get("tokens_used", 0),
+                    "pageContextSize": page_context_size,
+                    "url": self.browser.page.url,
+                    "_params": plan["params"]  # internal, for retry detection
+                }
+                self._step_metrics.append(step_metric)
+                self._metrics.log_step({k: v for k, v in step_metric.items() if k != "_params"})
 
-                if plan["goal_status"] == "blocked":
-                    self.memory.status = "blocked"
-                    errors.append({
-                        "type": "goal_blocked",
-                        "message": plan["reasoning"]
-                    })
-                    self.memory.save()
+                # 6. Update wasted step counters
+                if not result.success:
+                    self._wasted_failures += 1
+                if prev_action == plan["action"] and prev_params == plan["params"]:
+                    self._wasted_retries += 1
+                if result.navigated and result.new_url and result.new_url in urls_before_step:
+                    self._wasted_redundant += 1
 
-                    # Close browser on terminal state
-                    self._should_close_browser = True
-
-                    # Send webhook: blocked
-                    await self._send_webhook("blocked", plan["reasoning"])
-
+                if should_abort:
                     return self._build_response(
                         success=False,
                         goal_achieved=False,
                         errors=errors
                     )
 
-                if plan["goal_status"] == "needs_input":
-                    missing_fields = plan.get("missing_fields", [])
-                    self.memory.status = "needs_input"
-                    self.memory.set_missing_fields(missing_fields)
-                    self.memory.save()
-
-                    # Keep browser open for when user provides input
-                    self._should_close_browser = False
-
-                    # Send webhook: needs_input
-                    await self._send_webhook("needs_input", plan["reasoning"], missing_fields=missing_fields)
-
-                    return self._build_response(
-                        success=True,
-                        goal_achieved=False,
-                        errors=errors,
-                        needs_input=True,
-                        missing_fields=missing_fields,
-                        message=plan["reasoning"]
-                    )
-
-                if plan["goal_status"] == "awaiting_user_action":
-                    self.memory.status = "awaiting_user_action"
-                    self.memory.save()
-
-                    # Keep browser open for user interaction
-                    self._should_close_browser = False
-
-                    # Send webhook: awaiting_user_action
-                    await self._send_webhook("awaiting_user_action", plan["reasoning"])
-
-                    return self._build_response(
-                        success=True,
-                        goal_achieved=False,
-                        errors=errors,
-                        awaiting_user_action=True,
-                        message=plan["reasoning"]
-                    )
-
-                # 4. Execute the action (use stored profile which includes merged data)
-                result = await self.action_executor.execute_action(
-                    action_type=plan["action"],
-                    params=plan["params"],
-                    user_profile=self.memory.user_profile
-                )
-
-                # 5. Record action in memory
-                action_record = ActionRecord(
-                    step=step,
-                    action_type=plan["action"],
-                    params=plan["params"],
-                    success=result.success,
-                    result={
-                        "details": result.details,
-                        "error": result.error,
-                        "navigated": result.navigated,
-                        "new_url": result.new_url
-                    }
-                )
-                self.memory.add_action(action_record)
-                self.memory.current_step = step
-
-                if config.DEBUG:
-                    status = "OK" if result.success else "FAIL"
-                    print(f"[AGENT] Action result: {status}")
-                    if result.error:
-                        print(f"[AGENT] Error: {result.error}")
-                    if result.navigated:
-                        print(f"[AGENT] Navigated to: {result.new_url}")
-
-                # Track URL changes
-                if result.navigated and result.new_url:
-                    self.memory.add_visited_url(result.new_url)
-                    self.memory.current_url = result.new_url
-
-                # Handle failures
-                if not result.success:
-                    consecutive_failures += 1
-                    errors.append({
-                        "type": "action_error",
-                        "action": plan["action"],
-                        "message": result.error,
-                        "step": step
-                    })
-
-                    # Give up after too many consecutive failures
-                    if consecutive_failures >= 3:
-                        self.memory.status = "failed"
-                        self.memory.save()
-
-                        # Send webhook: failed
-                        await self._send_webhook("failed", "Too many consecutive failures")
-
-                        return self._build_response(
-                            success=False,
-                            goal_achieved=False,
-                            errors=errors
-                        )
-                else:
-                    consecutive_failures = 0
-
-                # Save memory after each step
-                self.memory.save()
-
-                # Send webhook: step completed
-                await self._send_webhook("step_completed", f"Step {step}: {plan['action']}", data={
-                    "step": step,
-                    "action": plan["action"],
-                    "success": result.success
-                })
-
             # Exceeded max steps
-            self.memory.status = "failed"
+            self.memory.status = GoalStatus.FAILED
             errors.append({
                 "type": "max_steps_exceeded",
-                "message": f"Reached maximum step limit ({max_steps})"
+                "message": f"Reached maximum step limit ({max_steps})",
+                "details": {}
             })
             self.memory.save()
 
             # Send webhook: failed
-            await self._send_webhook("failed", f"Exceeded max steps ({max_steps})")
+            await self._send_webhook(GoalStatus.FAILED, f"Exceeded max steps ({max_steps})")
 
             return self._build_response(
                 success=False,
@@ -387,15 +337,16 @@ class AutonomousWebAgent:
             )
 
         except Exception as e:
-            self.memory.status = "failed"
+            self.memory.status = GoalStatus.FAILED
             errors.append({
                 "type": "unexpected_error",
-                "message": str(e)
+                "message": str(e),
+                "details": {}
             })
             self.memory.save()
 
             # Send webhook: failed
-            await self._send_webhook("failed", f"Unexpected error: {str(e)}")
+            await self._send_webhook(GoalStatus.FAILED, f"Unexpected error: {str(e)}")
 
             return self._build_response(
                 success=False,
@@ -406,52 +357,147 @@ class AutonomousWebAgent:
         finally:
             if self._should_close_browser:
                 await self.browser.close()
+            if self._http_client:
+                await self._http_client.aclose()
+                self._http_client = None
 
-    async def _build_page_context(self) -> str:
-        """Build page context string for LLM
+    async def _check_goal_status(
+        self,
+        plan: Dict[str, Any],
+        errors: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Check plan goal_status and return response if terminal, else None
+
+        Args:
+            plan: LLM plan with goal_status
+            errors: Accumulated errors list
 
         Returns:
-            Formatted string with page URL, title, content, forms, links, buttons
+            Response dict if terminal status, None to continue
         """
-        url = self.browser.page.url
-        title = await self.browser.get_page_title()
-        forms = await self.browser.get_form_elements()
-        links = await self.browser.get_page_links()
-        buttons = await self.browser.get_page_buttons()
-        content = await self.browser.get_readable_content()
+        status = plan["goal_status"]
 
-        sections = [
-            "## Current Page",
-            f"URL: {url}",
-            f"Title: {title}",
-            "",
-            "## Page Content",
-            content[:1500] if len(content) > 1500 else content,
-            "",
-        ]
+        if status == GoalStatus.ACHIEVED:
+            self.memory.status = GoalStatus.ACHIEVED
+            self.memory.save()
+            self._should_close_browser = True
+            await self._send_webhook(GoalStatus.ACHIEVED, "Goal completed successfully")
+            return self._build_response(success=True, goal_achieved=True, errors=errors)
 
-        if "No forms found" not in forms:
-            sections.extend([
-                "## Forms on Page",
-                forms,
-                "",
-            ])
+        if status == GoalStatus.BLOCKED:
+            self.memory.status = GoalStatus.BLOCKED
+            errors.append({"type": "goal_blocked", "message": plan["reasoning"], "details": {}})
+            self.memory.save()
+            self._should_close_browser = True
+            await self._send_webhook(GoalStatus.BLOCKED, plan["reasoning"])
+            return self._build_response(success=False, goal_achieved=False, errors=errors)
 
-        if "No links found" not in links:
-            sections.extend([
-                "## Available Links",
-                links,
-                "",
-            ])
+        if status == GoalStatus.NEEDS_INPUT:
+            missing_fields = plan.get("missing_fields", [])
+            self.memory.status = GoalStatus.NEEDS_INPUT
+            self.memory.set_missing_fields(missing_fields)
+            self.memory.save()
+            self._should_close_browser = False
+            await self._send_webhook(GoalStatus.NEEDS_INPUT, plan["reasoning"], missing_fields=missing_fields)
+            return self._build_response(
+                success=True, goal_achieved=False, errors=errors,
+                needs_input=True, missing_fields=missing_fields, message=plan["reasoning"]
+            )
 
-        if "No standalone buttons" not in buttons:
-            sections.extend([
-                "## Available Buttons",
-                buttons,
-                "",
-            ])
+        if status == GoalStatus.AWAITING_USER_ACTION:
+            self.memory.status = GoalStatus.AWAITING_USER_ACTION
+            self.memory.save()
+            self._should_close_browser = False
+            await self._send_webhook(GoalStatus.AWAITING_USER_ACTION, plan["reasoning"])
+            return self._build_response(
+                success=True, goal_achieved=False, errors=errors,
+                awaiting_user_action=True, message=plan["reasoning"]
+            )
 
-        return "\n".join(sections)
+        return None
+
+    async def _execute_and_record_step(
+        self,
+        step: int,
+        plan: Dict[str, Any],
+        errors: List[Dict[str, Any]],
+        consecutive_failures: int
+    ) -> tuple:
+        """Execute an action and record it in memory
+
+        Args:
+            step: Current step number
+            plan: LLM plan with action and params
+            errors: Accumulated errors list
+            consecutive_failures: Count of consecutive failures
+
+        Returns:
+            (consecutive_failures, should_abort, result) tuple
+        """
+        from src.action_executor import ActionResult
+
+        result = await self.action_executor.execute_action(
+            action_type=plan["action"],
+            params=plan["params"]
+        )
+
+        # Record action in memory
+        action_record = ActionRecord(
+            step=step,
+            action_type=plan["action"],
+            params=plan["params"],
+            success=result.success,
+            result={
+                "details": result.details,
+                "error": result.error,
+                "navigated": result.navigated,
+                "new_url": result.new_url
+            }
+        )
+        self.memory.add_action(action_record)
+        self.memory.current_step = step
+
+        if config.DEBUG:
+            status_str = "OK" if result.success else "FAIL"
+            logger.debug(f"[AGENT] Action result: {status_str}")
+            if result.error:
+                logger.debug(f"[AGENT] Error: {result.error}")
+            if result.navigated:
+                logger.debug(f"[AGENT] Navigated to: {result.new_url}")
+
+        # Track URL changes
+        if result.navigated and result.new_url:
+            self.memory.add_visited_url(result.new_url)
+            self.memory.current_url = result.new_url
+
+        # Handle failures
+        if not result.success:
+            consecutive_failures += 1
+            errors.append({
+                "type": result.error["type"] if result.error else "action_error",
+                "message": result.error["message"] if result.error else "Unknown error",
+                "details": {"action": plan["action"], "step": step, **(result.error.get("details", {}) if result.error else {})}
+            })
+
+            if consecutive_failures >= 3:
+                self.memory.status = GoalStatus.FAILED
+                self.memory.save()
+                await self._send_webhook(GoalStatus.FAILED, "Too many consecutive failures")
+                return consecutive_failures, True, result
+        else:
+            consecutive_failures = 0
+
+        # Save memory after each step
+        self.memory.save()
+
+        # Send webhook: step completed
+        await self._send_webhook(GoalStatus.STEP_COMPLETED, f"Step {step}: {plan['action']}", data={
+            "step": step,
+            "action": plan["action"],
+            "success": result.success
+        })
+
+        return consecutive_failures, False, result
 
     def _build_response(
         self,
@@ -480,16 +526,7 @@ class AutonomousWebAgent:
         execution_time = time.time() - self.start_time if self.start_time else 0
 
         # Format action history
-        action_history = []
-        for action in self.memory.action_history:
-            action_history.append({
-                "step": action.step,
-                "action": action.action_type,
-                "params": action.params,
-                "success": action.success,
-                "result": action.result,
-                "timestamp": action.timestamp.isoformat()
-            })
+        action_history = self.memory.format_action_history()
 
         response = {
             "success": success,
@@ -509,6 +546,28 @@ class AutonomousWebAgent:
             },
             "errors": errors
         }
+
+        # Log task summary metrics
+        if self._metrics:
+            llm_times = [s["timings"]["llmPlanning"] for s in self._step_metrics if "timings" in s]
+            avg_llm_time = sum(llm_times) / len(llm_times) if llm_times else 0
+            self._metrics.log_summary({
+                "type": "task_summary",
+                "sessionId": self.memory.session_id,
+                "timestamp": datetime.now().isoformat(),
+                "goal": self.memory.goal,
+                "finalStatus": self.memory.status,
+                "totalSteps": self.memory.current_step,
+                "wastedSteps": {
+                    "failures": self._wasted_failures,
+                    "retries": self._wasted_retries,
+                    "redundant": self._wasted_redundant
+                },
+                "totalTime": execution_time,
+                "totalTokens": self.total_tokens,
+                "avgStepTime": execution_time / max(self.memory.current_step, 1),
+                "avgLlmTime": avg_llm_time
+            })
 
         # Add needs_input fields when applicable
         if needs_input:

@@ -2,6 +2,7 @@
 // Profile management page logic
 
 import { encryptProfile, decryptProfile } from './crypto.js';
+import { formatFieldLabel } from './ui.js';
 
 // DOM elements
 const statusEl = document.getElementById('status');
@@ -175,13 +176,12 @@ function renderDynamicFields(profile) {
 	});
 }
 
-// Format field name to label (camelCase to Title Case)
-function formatFieldLabel(fieldName) {
-	return fieldName
-		.replace(/([A-Z])/g, ' $1')
-		.replace(/^./, str => str.toUpperCase())
-		.replace(/_/g, ' ')
-		.trim();
+// Small DOM helper to reduce createElement boilerplate
+function el(tag, className, text) {
+	const node = document.createElement(tag);
+	if (className) node.className = className;
+	if (text != null) node.textContent = text;
+	return node;
 }
 
 // Check if a field name is sensitive
@@ -202,24 +202,18 @@ function renderSiteData(siteData) {
 
 	sites.forEach(site => {
 		const fields = siteData[site];
-		const siteItem = document.createElement('div');
-		siteItem.className = 'site-item';
+		const siteItem = el('div', 'site-item');
 
 		// Site header (clickable to expand)
-		const siteHeader = document.createElement('div');
-		siteHeader.className = 'site-header';
+		const siteHeader = el('div', 'site-header');
 
-		const siteName = document.createElement('span');
-		siteName.className = 'site-name';
+		const siteName = el('span', 'site-name');
 		siteName.innerHTML = `<span class="chevron">▶</span> ${site}`;
 
-		const siteActions = document.createElement('div');
-		siteActions.className = 'site-actions';
+		const siteActions = el('div', 'site-actions');
 
-		const deleteSiteBtn = document.createElement('button');
+		const deleteSiteBtn = el('button', 'btn-icon delete', '\uD83D\uDDD1\uFE0F');
 		deleteSiteBtn.type = 'button';
-		deleteSiteBtn.className = 'btn-icon delete';
-		deleteSiteBtn.textContent = '🗑️';
 		deleteSiteBtn.title = 'Delete all data for this site';
 		deleteSiteBtn.addEventListener('click', (e) => {
 			e.stopPropagation();
@@ -236,25 +230,17 @@ function renderSiteData(siteData) {
 		});
 
 		// Site fields container
-		const siteFields = document.createElement('div');
-		siteFields.className = 'site-fields';
+		const siteFields = el('div', 'site-fields');
 
 		Object.keys(fields).forEach(fieldName => {
 			const fieldValue = fields[fieldName];
-			const fieldItem = document.createElement('div');
-			fieldItem.className = 'field-item';
+			const fieldItem = el('div', 'field-item');
+			const fieldInfo = el('div', 'field-info');
+			const fieldNameEl = el('span', 'field-name', formatFieldLabel(fieldName));
 
-			const fieldInfo = document.createElement('div');
-			fieldInfo.className = 'field-info';
-
-			const fieldNameEl = document.createElement('span');
-			fieldNameEl.className = 'field-name';
-			fieldNameEl.textContent = formatFieldLabel(fieldName);
-
-			const fieldValueEl = document.createElement('span');
-			fieldValueEl.className = 'field-value';
+			const fieldValueEl = el('span', 'field-value');
 			if (isSensitiveField(fieldName)) {
-				fieldValueEl.textContent = '••••••••';
+				fieldValueEl.textContent = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
 				fieldValueEl.classList.add('masked');
 			} else {
 				fieldValueEl.textContent = fieldValue;
@@ -263,10 +249,8 @@ function renderSiteData(siteData) {
 			fieldInfo.appendChild(fieldNameEl);
 			fieldInfo.appendChild(fieldValueEl);
 
-			const deleteFieldBtn = document.createElement('button');
+			const deleteFieldBtn = el('button', 'btn-icon delete', '\u2715');
 			deleteFieldBtn.type = 'button';
-			deleteFieldBtn.className = 'btn-icon delete';
-			deleteFieldBtn.textContent = '✕';
 			deleteFieldBtn.title = 'Delete this field';
 			deleteFieldBtn.addEventListener('click', () => {
 				deleteField(site, fieldName);

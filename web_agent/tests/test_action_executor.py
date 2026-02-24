@@ -31,7 +31,7 @@ def mock_browser():
     browser.page.evaluate = AsyncMock()
     browser.get_form_elements = AsyncMock(return_value="<form><input id='email'></form>")
     browser.get_readable_content = AsyncMock(return_value="Page content")
-    browser.go_back = AsyncMock(return_value=True)
+    browser.go_back = AsyncMock(return_value={"success": True, "error": None})
     browser.scroll = AsyncMock()
     return browser
 
@@ -103,11 +103,11 @@ class TestActionResult:
             success=False,
             action_type="fill_form",
             details={},
-            error="Element not found"
+            error={"type": "selector_error", "message": "Element not found", "details": {}}
         )
 
         assert result.success is False
-        assert result.error == "Element not found"
+        assert result.error["message"] == "Element not found"
 
 
 class TestActionExecutor:
@@ -118,20 +118,18 @@ class TestActionExecutor:
         """Test executing unknown action type returns error"""
         result = await action_executor.execute_action(
             action_type="unknown_action",
-            params={},
-            user_profile={}
+            params={}
         )
 
         assert result.success is False
-        assert "Unknown action type" in result.error
+        assert "Unknown action type" in result.error["message"]
 
     @pytest.mark.asyncio
     async def test_execute_fill_form_success(self, action_executor, mock_browser):
         """Test successful form filling"""
         result = await action_executor.execute_action(
             action_type="fill_form",
-            params={"submit": True},
-            user_profile={"email": "test@example.com"}
+            params={"submit": True}
         )
 
         assert result.success is True
@@ -140,16 +138,15 @@ class TestActionExecutor:
     @pytest.mark.asyncio
     async def test_execute_fill_form_no_forms(self, action_executor, mock_browser):
         """Test form filling when no forms found"""
-        mock_browser.get_form_elements = AsyncMock(return_value="No forms found on page")
+        mock_browser.get_form_elements = AsyncMock(return_value=None)
 
         result = await action_executor.execute_action(
             action_type="fill_form",
-            params={},
-            user_profile={}
+            params={}
         )
 
         assert result.success is False
-        assert "No forms found" in result.error
+        assert "No forms found" in result.error["message"]
 
     @pytest.mark.asyncio
     async def test_execute_fill_form_validation_fails(self, action_executor, mock_execution_engine):
@@ -158,12 +155,11 @@ class TestActionExecutor:
 
         result = await action_executor.execute_action(
             action_type="fill_form",
-            params={},
-            user_profile={"email": "test@example.com"}
+            params={}
         )
 
         assert result.success is False
-        assert "Validation failed" in result.error
+        assert "Validation failed" in result.error["message"]
 
     @pytest.mark.asyncio
     async def test_execute_click_link_by_text(self, action_executor, mock_browser):
@@ -172,8 +168,7 @@ class TestActionExecutor:
 
         result = await action_executor.execute_action(
             action_type="click_link",
-            params={"link_text": "Sign In"},
-            user_profile={}
+            params={"link_text": "Sign In"}
         )
 
         assert result.success is True
@@ -184,8 +179,7 @@ class TestActionExecutor:
         """Test clicking link by selector"""
         result = await action_executor.execute_action(
             action_type="click_link",
-            params={"selector": "a#signin-link"},
-            user_profile={}
+            params={"selector": "a#signin-link"}
         )
 
         assert result.success is True
@@ -196,20 +190,18 @@ class TestActionExecutor:
         """Test clicking link without required params"""
         result = await action_executor.execute_action(
             action_type="click_link",
-            params={},
-            user_profile={}
+            params={}
         )
 
         assert result.success is False
-        assert "Missing" in result.error
+        assert "Missing" in result.error["message"]
 
     @pytest.mark.asyncio
     async def test_execute_click_button_by_text(self, action_executor, mock_browser):
         """Test clicking button by text"""
         result = await action_executor.execute_action(
             action_type="click_button",
-            params={"button_text": "Submit"},
-            user_profile={}
+            params={"button_text": "Submit"}
         )
 
         assert result.success is True
@@ -222,12 +214,11 @@ class TestActionExecutor:
 
         result = await action_executor.execute_action(
             action_type="click_button",
-            params={"button_text": "NonExistent"},
-            user_profile={}
+            params={"button_text": "NonExistent"}
         )
 
         assert result.success is False
-        assert "Button not found" in result.error
+        assert "Button not found" in result.error["message"]
 
     @pytest.mark.asyncio
     async def test_execute_go_back_success(self, action_executor, mock_browser):
@@ -236,8 +227,7 @@ class TestActionExecutor:
 
         result = await action_executor.execute_action(
             action_type="go_back",
-            params={},
-            user_profile={}
+            params={}
         )
 
         assert result.success is True
@@ -246,12 +236,11 @@ class TestActionExecutor:
     @pytest.mark.asyncio
     async def test_execute_go_back_failure(self, action_executor, mock_browser):
         """Test going back when it fails"""
-        mock_browser.go_back = AsyncMock(return_value=False)
+        mock_browser.go_back = AsyncMock(return_value={"success": False, "error": {"type": "navigation_error", "message": "Failed to navigate back", "details": {}}})
 
         result = await action_executor.execute_action(
             action_type="go_back",
-            params={},
-            user_profile={}
+            params={}
         )
 
         assert result.success is False
@@ -261,8 +250,7 @@ class TestActionExecutor:
         """Test scrolling the page"""
         result = await action_executor.execute_action(
             action_type="scroll",
-            params={"direction": "down", "amount": 500},
-            user_profile={}
+            params={"direction": "down", "amount": 500}
         )
 
         assert result.success is True
@@ -273,8 +261,7 @@ class TestActionExecutor:
         """Test scrolling with default params"""
         result = await action_executor.execute_action(
             action_type="scroll",
-            params={},
-            user_profile={}
+            params={}
         )
 
         assert result.success is True
@@ -285,8 +272,7 @@ class TestActionExecutor:
         """Test waiting for element"""
         result = await action_executor.execute_action(
             action_type="wait",
-            params={"selector": "#loading", "timeout": 3000},
-            user_profile={}
+            params={"selector": "#loading", "timeout": 3000}
         )
 
         assert result.success is True
@@ -297,12 +283,11 @@ class TestActionExecutor:
         """Test waiting without selector"""
         result = await action_executor.execute_action(
             action_type="wait",
-            params={},
-            user_profile={}
+            params={}
         )
 
         assert result.success is False
-        assert "Missing selector" in result.error
+        assert "Missing selector" in result.error["message"]
 
     @pytest.mark.asyncio
     async def test_execute_wait_timeout(self, action_executor, mock_browser):
@@ -313,20 +298,18 @@ class TestActionExecutor:
 
         result = await action_executor.execute_action(
             action_type="wait",
-            params={"selector": "#never-appears"},
-            user_profile={}
+            params={"selector": "#never-appears"}
         )
 
         assert result.success is False
-        assert "Timeout" in result.error
+        assert "Timeout" in result.error["message"]
 
     @pytest.mark.asyncio
     async def test_execute_read_content(self, action_executor, mock_browser):
         """Test reading page content"""
         result = await action_executor.execute_action(
             action_type="read_content",
-            params={"purpose": "verification"},
-            user_profile={}
+            params={"purpose": "verification"}
         )
 
         assert result.success is True
@@ -339,8 +322,7 @@ class TestActionExecutor:
 
         result = await action_executor.execute_action(
             action_type="read_content",
-            params={"purpose": "get_error", "selector": ".error-message"},
-            user_profile={}
+            params={"purpose": "get_error", "selector": ".error-message"}
         )
 
         assert result.success is True
@@ -350,8 +332,7 @@ class TestActionExecutor:
         """Test no-op action"""
         result = await action_executor.execute_action(
             action_type="none",
-            params={},
-            user_profile={}
+            params={}
         )
 
         assert result.success is True
@@ -361,16 +342,16 @@ class TestActionExecutor:
     async def test_store_entered_data(self, temp_db, mock_browser, mock_execution_engine, mock_llm):
         """Test that entered data is stored in memory"""
         memory = SessionMemory()
+        memory.set_user_profile({
+            "email": "test@example.com",
+            "password": "secret123",
+            "firstName": "John"
+        })
         executor = ActionExecutor(mock_browser, mock_execution_engine, memory, mock_llm)
 
         await executor.execute_action(
             action_type="fill_form",
-            params={},
-            user_profile={
-                "email": "test@example.com",
-                "password": "secret123",
-                "firstName": "John"
-            }
+            params={}
         )
 
         assert memory.recall("email") == "test@example.com"
@@ -381,14 +362,14 @@ class TestActionExecutor:
     async def test_memory_data_merged_with_profile(self, temp_db, mock_browser, mock_execution_engine, mock_llm):
         """Test that memory data is merged with user profile"""
         memory = SessionMemory()
+        memory.set_user_profile({"password": "newpass"})
         memory.remember("email", "stored@example.com")
 
         executor = ActionExecutor(mock_browser, mock_execution_engine, memory, mock_llm)
 
         await executor.execute_action(
             action_type="fill_form",
-            params={},
-            user_profile={"password": "newpass"}
+            params={}
         )
 
         # LLM should receive merged profile

@@ -3,6 +3,7 @@
 
 import { startAgent, stopAgent, executeGoal, provideInput } from './agentClient.js';
 import { decryptProfile, encryptProfile } from './crypto.js';
+import { extractDomain } from './utils.js';
 
 // Agent session state
 let agentSession = { sessionId: null, port: null, taskId: null };
@@ -22,7 +23,7 @@ export function isProfileUnlocked() {
  * Get the current decrypted profile
  * @returns {Object|null}
  */
-export function getProfile() {
+function getProfile() {
 	return decryptedProfile;
 }
 
@@ -63,7 +64,7 @@ export async function unlockProfile(passphrase) {
 /**
  * Lock profile (clear decrypted data)
  */
-export function lockProfile() {
+function lockProfile() {
 	decryptedProfile = null;
 	currentPassphrase = null;
 }
@@ -139,7 +140,7 @@ export async function executeAgentGoal(goal, startUrl, options = {}) {
 		goal,
 		startUrl,
 		agentProfile,
-		{ headless: false, ...options }
+		options
 	);
 
 	agentSession.sessionId = result.sessionId;
@@ -200,20 +201,6 @@ export async function cleanup() {
 }
 
 /**
- * Extract domain from URL
- * @param {string} url - Full URL
- * @returns {string} Domain name
- */
-function getDomainFromUrl(url) {
-	try {
-		const urlObj = new URL(url);
-		return urlObj.hostname;
-	} catch {
-		return url;
-	}
-}
-
-/**
  * Save form data to profile's siteData
  * @param {Object} formData - Key-value pairs to save
  */
@@ -224,7 +211,7 @@ async function saveSiteData(formData) {
 	}
 
 	try {
-		const domain = getDomainFromUrl(currentAgentUrl);
+		const domain = extractDomain(currentAgentUrl);
 
 		if (!decryptedProfile.siteData) {
 			decryptedProfile.siteData = {};

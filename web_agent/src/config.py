@@ -1,12 +1,25 @@
 """Configuration management for Web Form-Filling Agent"""
 
 import os
+from enum import Enum
 from pathlib import Path
 from typing import List
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+
+class GoalStatus(str, Enum):
+    """Status values for goal execution, used across agent modules"""
+    IN_PROGRESS = "in_progress"
+    ACHIEVED = "achieved"
+    BLOCKED = "blocked"
+    FAILED = "failed"
+    NEEDS_INPUT = "needs_input"
+    AWAITING_USER_ACTION = "awaiting_user_action"
+    STARTED = "started"
+    STEP_COMPLETED = "step_completed"
 
 
 class Config:
@@ -69,6 +82,3 @@ class Config:
 
 # Create global config instance
 config = Config()
-
-# Validate on import
-config.validate()

@@ -1,9 +1,10 @@
 // extension/panel.js
 // Main entry point - unified message handling with SSE integration
 
+import { SERVER_BASE } from './config.js';
 import { sendToBot } from './llmClient.js';
 import { runReActLoop } from './react.js';
-import { connectSSE, disconnectSSE, addSSEHandler } from './agentClient.js';
+import { connectSSE, disconnectSSE } from './agentClient.js';
 import { detectIntent, INTENT } from './intent.js';
 import {
 	isProfileUnlocked,
@@ -19,13 +20,18 @@ import {
 } from './agent.js';
 import {
 	addMessage,
-	addStepMessage,
-	addAgentStepMessage,
 	addMetaMessage,
+	updateHeaderProgress,
 	renderInputForm,
 	removeCurrentForm,
 	showStickyBanner,
-	hideStickyBanner
+	hideStickyBanner,
+	showPasswordModal,
+	hidePasswordModal,
+	onPasswordModal,
+	showStopButton,
+	hideStopButton,
+	onStopAgentClick
 } from './ui.js';
 
 // DOM elements
@@ -33,21 +39,22 @@ const form = document.getElementById('form');
 const input = document.getElementById('prompt');
 const closeBtn = document.getElementById('close');
 const optionsBtn = document.getElementById('open-options');
-const stopAgentBtn = document.getElementById('stop-agent-btn');
-const passwordModal = document.getElementById('password-modal');
-const modalPassphrase = document.getElementById('modal-passphrase');
-const modalCancel = document.getElementById('modal-cancel');
-const modalSubmit = document.getElementById('modal-submit');
 const bannerContinue = document.getElementById('banner-continue');
 
 // State
 let isTestingMode = false;
 let pendingAgentRequest = null;  // Stores {text, url} when awaiting confirmation
 let lastSeenTimestamp = 0;       // For SSE reconnect deduplication
+let agentNumber = 0;             // Sequential agent counter (increments per session)
+const MAX_AGENT_STEPS = 20;      // Default max steps from web agent config
 
-// Load settings
-const stored = await chrome.storage.local.get(['isTestingMode']);
-isTestingMode = stored.isTestingMode || false;
+// Load settings (wrapped in try/catch for top-level await safety)
+try {
+	const stored = await chrome.storage.local.get(['isTestingMode']);
+	isTestingMode = stored.isTestingMode || false;
+} catch (error) {
+	console.error('[Panel] Failed to load settings:', error);
+}
 
 // Listen for settings changes
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -57,21 +64,34 @@ chrome.storage.onChanged.addListener((changes, area) => {
 	}
 });
 
-// Track panel state
+// Track panel state and cleanup on close (consolidated unload/beforeunload)
 chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
 	if (tab?.id) chrome.runtime.sendMessage({ type: 'PANEL_OPEN', tabId: tab.id });
 });
 
-window.addEventListener('unload', () => {
+window.addEventListener('beforeunload', () => {
 	chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
 		if (tab?.id) chrome.runtime.sendMessage({ type: 'PANEL_CLOSED', tabId: tab.id });
 	});
 	disconnectSSE();
+	if (hasActiveSession()) {
+		stopAgentSession().catch(() => {});
+	}
 });
 
 // =============================================================================
 // SSE Setup
 // =============================================================================
+
+/**
+ * Guard: only process SSE events for our active session
+ * @param {Object} data - SSE event data
+ * @returns {boolean} true if event should be handled
+ */
+function isOurSession(data) {
+	const session = getAgentSession();
+	return !session.port || data.port === session.port;
+}
 
 function setupSSE() {
 	connectSSE({
@@ -116,32 +136,34 @@ function handleStateSync(data) {
 function handleAgentStatusEvent(data) {
 	lastSeenTimestamp = data.timestamp || Date.now();
 
-	// Only handle events for our session
-	const session = getAgentSession();
-	if (session.port && data.port !== session.port) {
-		return;
-	}
+	if (!isOurSession(data)) return;
 
 	switch (data.status) {
 		case 'started':
-			addAgentStepMessage(data.message || 'Agent started');
+			updateHeaderProgress(`Agent ${agentNumber}: Starting...`);
 			showStopButton();
 			break;
-		case 'step_completed':
-			addAgentStepMessage(data.message || `Step ${data.data?.step} completed`);
+		case 'step_completed': {
+			const step = data.data?.step || '?';
+			const action = data.data?.action || 'working';
+			updateHeaderProgress(`Agent ${agentNumber}: ${action}... (${step}/${MAX_AGENT_STEPS})`);
 			break;
+		}
 		case 'achieved':
+			updateHeaderProgress('');
 			addMessage('bot', data.message || 'Task completed successfully!');
 			hideStopButton();
 			clearAgentSession();
 			break;
 		case 'failed':
 		case 'blocked':
+			updateHeaderProgress('');
 			addMessage('bot', data.message || 'Task failed');
 			hideStopButton();
 			clearAgentSession();
 			break;
 		case 'awaiting_user_action':
+			updateHeaderProgress('');
 			showStickyBanner(data.message || 'Please complete the action in the browser');
 			break;
 	}
@@ -150,17 +172,13 @@ function handleAgentStatusEvent(data) {
 function handleNeedsInputEvent(data) {
 	lastSeenTimestamp = data.timestamp || Date.now();
 
-	// Only handle events for our session
-	const session = getAgentSession();
-	if (session.port && data.port !== session.port) {
-		return;
-	}
+	if (!isOurSession(data)) return;
 
-	addAgentStepMessage(`Agent needs: ${data.missingFields?.join(', ') || 'information'}`);
+	updateHeaderProgress('');
 	addMessage('bot', data.message || 'Please provide the missing information:');
 
 	renderInputForm(data.missingFields, null, async (formData) => {
-		addAgentStepMessage('Continuing with provided information...');
+		updateHeaderProgress(`Agent ${agentNumber}: Continuing...`);
 		try {
 			await provideAgentInput(formData);
 		} catch (error) {
@@ -242,19 +260,35 @@ async function handleSimpleIntent(text, currentUrl) {
 
 async function handleResearchIntent(text, currentUrl) {
 	try {
-		addStepMessage('Starting research...');
+		updateHeaderProgress('Researching...');
 
 		const result = await runReActLoop(text, currentUrl, (stepInfo) => {
 			const desc = getActionDescription(stepInfo);
-			addStepMessage(desc);
+			updateHeaderProgress(desc);
 		});
 
-		if (result.answer) {
-			addMessage('bot', result.answer);
-		} else {
-			addMessage('bot', 'I was unable to find an answer to your question.');
+		updateHeaderProgress('');
+		const answer = result.answer || 'I was unable to find an answer to your question.';
+		addMessage('bot', answer);
+
+		// Store the user query and final answer in conversation history
+		try {
+			await fetch(`${SERVER_BASE}/api/history/add`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					userId: 1,
+					messages: [
+						{ role: 'user', content: text },
+						{ role: 'assistant', content: answer }
+					]
+				})
+			});
+		} catch (histErr) {
+			console.error('[Panel] Failed to store research history:', histErr);
 		}
 	} catch (error) {
+		updateHeaderProgress('');
 		console.error('[Panel] Research mode error:', error);
 		addMessage('bot', `Error: ${error.message}`);
 	}
@@ -283,8 +317,8 @@ async function handleAgentIntent(text, url, intentResult) {
 
 async function handleConfirmationResponse(text) {
 	const lower = text.toLowerCase().trim();
-	const affirmative = /^(yes|yeah|yep|sure|ok|okay|go ahead|proceed|do it|y)$/i.test(lower);
-	const negative = /^(no|nope|nah|cancel|stop|nevermind|never mind|n)$/i.test(lower);
+	const affirmative = /^(yes|yeah|yep|sure|ok|okay|go ahead|proceed|do it|y)$/.test(lower);
+	const negative = /^(no|nope|nah|cancel|stop|nevermind|never mind|n)$/.test(lower);
 
 	if (negative) {
 		addMessage('bot', 'Okay, I won\'t start the agent. Let me know if you need anything else.');
@@ -309,13 +343,14 @@ async function executeAgentTask(goal, url) {
 	try {
 		// Start agent if not already running
 		if (!hasActiveSession()) {
-			addAgentStepMessage('Starting agent...');
+			agentNumber++;
+			updateHeaderProgress(`Agent ${agentNumber}: Starting...`);
 			const taskId = `task-${Date.now()}`;
 			await startAgentSession(taskId);
 			showStopButton();
 		}
 
-		addAgentStepMessage('Agent is working on your request...');
+		updateHeaderProgress(`Agent ${agentNumber}: Working...`);
 		const result = await executeAgentGoal(goal, url);
 
 		// Handle immediate response (non-SSE path for backwards compatibility)
@@ -327,6 +362,7 @@ async function executeAgentTask(goal, url) {
 		// needs_input and awaiting_user_action will come via SSE
 
 	} catch (error) {
+		updateHeaderProgress('');
 		console.error('[Panel] Agent task error:', error);
 		addMessage('bot', `Agent error: ${error.message}`);
 	}
@@ -351,59 +387,38 @@ function getActionDescription(stepInfo) {
 }
 
 // =============================================================================
-// Password Modal
+// Password Modal (DOM logic in ui.js, callbacks here)
 // =============================================================================
 
-function showPasswordModal() {
-	passwordModal.classList.add('visible');
-	modalPassphrase.value = '';
-	modalPassphrase.focus();
-}
-
-function hidePasswordModal() {
-	passwordModal.classList.remove('visible');
-	modalPassphrase.value = '';
-}
-
-modalCancel.addEventListener('click', () => {
-	hidePasswordModal();
-	if (pendingAgentRequest) {
-		addMessage('bot', 'Agent task cancelled.');
-		pendingAgentRequest = null;
-	}
-});
-
-modalSubmit.addEventListener('click', async () => {
-	const passphrase = modalPassphrase.value;
-	if (!passphrase) return;
-
-	try {
-		await unlockProfile(passphrase);
-		hidePasswordModal();
-
+onPasswordModal({
+	onCancel: () => {
 		if (pendingAgentRequest) {
-			const { text, url } = pendingAgentRequest;
-			// Now ask for confirmation
-			addMessage('bot', `Profile unlocked. I'll open a browser and work on: "${text}" at ${url}. Should I proceed?`);
-		} else {
-			addMessage('bot', 'Profile unlocked.');
+			addMessage('bot', 'Agent task cancelled.');
+			pendingAgentRequest = null;
 		}
-	} catch (error) {
-		console.error('[Panel] Unlock error:', error);
-		if (error.message.includes('decrypt')) {
-			addMessage('bot', 'Incorrect passphrase. Please try again.');
-		} else {
-			addMessage('bot', `Error: ${error.message}`);
-		}
-		hidePasswordModal();
-		pendingAgentRequest = null;
-	}
-});
+	},
+	onSubmit: async (passphrase) => {
+		try {
+			await unlockProfile(passphrase);
+			hidePasswordModal();
 
-modalPassphrase.addEventListener('keydown', (e) => {
-	if (e.key === 'Enter') {
-		e.preventDefault();
-		modalSubmit.click();
+			if (pendingAgentRequest) {
+				const { text, url } = pendingAgentRequest;
+				// Now ask for confirmation
+				addMessage('bot', `Profile unlocked. I'll open a browser and work on: "${text}" at ${url}. Should I proceed?`);
+			} else {
+				addMessage('bot', 'Profile unlocked.');
+			}
+		} catch (error) {
+			console.error('[Panel] Unlock error:', error);
+			if (error.message.includes('decrypt')) {
+				addMessage('bot', 'Incorrect passphrase. Please try again.');
+			} else {
+				addMessage('bot', `Error: ${error.message}`);
+			}
+			hidePasswordModal();
+			pendingAgentRequest = null;
+		}
 	}
 });
 
@@ -413,7 +428,7 @@ modalPassphrase.addEventListener('keydown', (e) => {
 
 bannerContinue.addEventListener('click', async () => {
 	hideStickyBanner();
-	addAgentStepMessage('Continuing after user action...');
+	updateHeaderProgress(`Agent ${agentNumber}: Continuing...`);
 
 	try {
 		await provideAgentInput({});
@@ -429,14 +444,15 @@ bannerContinue.addEventListener('click', async () => {
 
 function isStopCommand(text) {
 	const lower = text.toLowerCase().trim();
-	return /^(stop|cancel|abort|quit|nevermind|never mind|stop agent|cancel agent)$/i.test(lower);
+	return /^(stop|cancel|abort|quit|nevermind|never mind|stop agent|cancel agent)$/.test(lower);
 }
 
 async function handleStopAgent() {
 	addMessage('bot', 'Stopping the agent...');
 	try {
 		await stopAgentSession();
-		addAgentStepMessage('Agent stopped');
+		updateHeaderProgress('');
+		addMessage('bot', 'Agent stopped.');
 		hideStopButton();
 		hideStickyBanner();
 		removeCurrentForm();
@@ -446,17 +462,7 @@ async function handleStopAgent() {
 	}
 }
 
-function showStopButton() {
-	stopAgentBtn.hidden = false;
-}
-
-function hideStopButton() {
-	stopAgentBtn.hidden = true;
-}
-
-stopAgentBtn.addEventListener('click', async () => {
-	await handleStopAgent();
-});
+onStopAgentClick(handleStopAgent);
 
 // =============================================================================
 // Button Handlers
@@ -475,10 +481,3 @@ optionsBtn.addEventListener('click', () => {
 // =============================================================================
 
 addMetaMessage('Shortcut: Ctrl+Shift+Y | Type a message to start');
-
-// Cleanup on close
-window.addEventListener('beforeunload', () => {
-	if (hasActiveSession()) {
-		stopAgentSession().catch(() => {});
-	}
-});

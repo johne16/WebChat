@@ -22,8 +22,8 @@ async def test_navigate_to_valid_url():
     browser = BrowserManager(headless=True)
     await browser.launch()
 
-    success = await browser.navigate("https://example.com")
-    assert success is True
+    result = await browser.navigate("https://example.com")
+    assert result["success"] is True
 
     await browser.close()
 
@@ -34,8 +34,8 @@ async def test_navigate_to_invalid_url():
     browser = BrowserManager(headless=True, timeout=5000)
     await browser.launch()
 
-    success = await browser.navigate("http://invalid-url-that-does-not-exist-12345.com")
-    assert success is False
+    result = await browser.navigate("http://invalid-url-that-does-not-exist-12345.com")
+    assert result["success"] is False
 
     await browser.close()
 
@@ -93,7 +93,7 @@ async def test_format_for_llm_empty():
 
     result = browser._format_for_llm([])
 
-    assert "No forms found" in result
+    assert result is None
 
 
 @pytest.mark.asyncio

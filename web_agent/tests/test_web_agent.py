@@ -40,13 +40,13 @@ def mock_browser():
         browser = MagicMock()
         browser.launch = AsyncMock()
         browser.close = AsyncMock()
-        browser.navigate = AsyncMock(return_value=True)
+        browser.navigate = AsyncMock(return_value={"success": True, "error": None})
         browser.page = MagicMock()
         browser.page.url = "http://example.com"
         browser.get_page_title = AsyncMock(return_value="Test Page")
         browser.get_form_elements = AsyncMock(return_value="<form></form>")
-        browser.get_page_links = AsyncMock(return_value="No links found")
-        browser.get_page_buttons = AsyncMock(return_value="No standalone buttons")
+        browser.get_page_links = AsyncMock(return_value=None)
+        browser.get_page_buttons = AsyncMock(return_value=None)
         browser.get_readable_content = AsyncMock(return_value="Page content")
         mock_class.return_value = browser
         yield browser
@@ -127,7 +127,7 @@ class TestAutonomousWebAgent:
         self, temp_db, mock_config, mock_browser, mock_llm
     ):
         """Test goal execution fails on navigation error"""
-        mock_browser.navigate = AsyncMock(return_value=False)
+        mock_browser.navigate = AsyncMock(return_value={"success": False, "error": {"type": "navigation_error", "message": "Failed to navigate", "details": {"url": "http://invalid.example.com"}}})
 
         agent = AutonomousWebAgent()
         result = await agent.execute_goal(
@@ -200,7 +200,7 @@ class TestAutonomousWebAgent:
             success=False,
             action_type="fill_form",
             details={},
-            error="Element not found"
+            error={"type": "selector_error", "message": "Element not found", "details": {}}
         ))
 
         mock_llm.generate_plan = AsyncMock(return_value={
@@ -323,9 +323,9 @@ class TestAutonomousWebAgent:
         self, temp_db, mock_config, mock_browser, mock_llm
     ):
         """Test that empty sections are excluded from context"""
-        mock_browser.get_form_elements = AsyncMock(return_value="No forms found")
-        mock_browser.get_page_links = AsyncMock(return_value="No links found")
-        mock_browser.get_page_buttons = AsyncMock(return_value="No standalone buttons")
+        mock_browser.get_form_elements = AsyncMock(return_value=None)
+        mock_browser.get_page_links = AsyncMock(return_value=None)
+        mock_browser.get_page_buttons = AsyncMock(return_value=None)
 
         agent = AutonomousWebAgent()
         agent.browser = mock_browser
@@ -380,7 +380,7 @@ class TestAutonomousWebAgent:
         self, temp_db, mock_config, mock_browser, mock_llm
     ):
         """Test browser is closed after failed execution"""
-        mock_browser.navigate = AsyncMock(return_value=False)
+        mock_browser.navigate = AsyncMock(return_value={"success": False, "error": {"type": "navigation_error", "message": "Failed", "details": {}}})
 
         agent = AutonomousWebAgent()
         await agent.execute_goal(

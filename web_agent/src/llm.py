@@ -1,11 +1,16 @@
 """OpenAI client for generating form-filling JavaScript code"""
 
 import json
+import logging
 import re
+import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from openai import AsyncOpenAI
-from src.config import config
+from src.config import config, GoalStatus
+
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -106,7 +111,7 @@ class LLMClient:
         self,
         goal: str,
         page_context: str,
-        memory_context: Dict[str, Any],
+        memory_context: str,
         user_profile: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Generate next action plan based on goal and page state
@@ -114,7 +119,7 @@ class LLMClient:
         Args:
             goal: User's goal string
             page_context: Formatted page state from PageAnalyzer
-            memory_context: Session memory context
+            memory_context: Pre-formatted memory context string from SessionMemory.format_context_for_llm()
             user_profile: User profile data
 
         Returns:
@@ -126,6 +131,8 @@ class LLMClient:
                 "tokens_used": int       # Total tokens
             }
         """
+        t0 = time.perf_counter()
+
         # Build planning prompt
         messages = [
             {"role": "system", "content": self.planning_prompt}
@@ -138,7 +145,7 @@ class LLMClient:
         messages.append({"role": "user", "content": user_msg})
 
         if config.DEBUG:
-            print(f"[LLM] Sending request - model: {self.model}, context length: {len(user_msg)} chars")
+            logger.debug(f"[LLM] Sending request - model: {self.model}, context length: {len(user_msg)} chars")
 
         try:
             response = await self.client.chat.completions.create(
@@ -153,20 +160,22 @@ class LLMClient:
             finish_reason = response.choices[0].finish_reason
 
             if config.DEBUG:
-                print(f"[LLM] Response finish_reason: {finish_reason}")
-                print(f"[LLM] Raw response content: {content[:500] if content else 'EMPTY'}")
+                logger.debug(f"[LLM] Response finish_reason: {finish_reason}")
+                logger.debug(f"[LLM] Raw response content: {content[:500] if content else 'EMPTY'}")
 
             if not content or not content.strip():
                 return {
                     "action": "none",
                     "params": {},
                     "reasoning": "LLM returned empty response",
-                    "goal_status": "blocked",
-                    "tokens_used": response.usage.total_tokens if response.usage else 0
+                    "goal_status": GoalStatus.BLOCKED,
+                    "tokens_used": response.usage.total_tokens if response.usage else 0,
+                    "planning_time": time.perf_counter() - t0
                 }
 
             plan = self._parse_plan_response(content)
             plan["tokens_used"] = response.usage.total_tokens
+            plan["planning_time"] = time.perf_counter() - t0
 
             return plan
 
@@ -176,15 +185,16 @@ class LLMClient:
                 "action": "none",
                 "params": {},
                 "reasoning": f"LLM error: {str(e)}",
-                "goal_status": "blocked",
-                "tokens_used": 0
+                "goal_status": GoalStatus.BLOCKED,
+                "tokens_used": 0,
+                "planning_time": time.perf_counter() - t0
             }
 
     def _build_planning_context(
         self,
         goal: str,
         page_context: str,
-        memory_context: Dict[str, Any],
+        memory_context: str,
         user_profile: Dict[str, Any]
     ) -> str:
         """Build context string for planning prompt
@@ -192,7 +202,7 @@ class LLMClient:
         Args:
             goal: User's goal
             page_context: Formatted page state
-            memory_context: Session memory
+            memory_context: Pre-formatted memory context string
             user_profile: User data
 
         Returns:
@@ -206,21 +216,10 @@ class LLMClient:
             "## User Profile",
             json.dumps(user_profile, indent=2),
             "",
-            "## Session Memory",
-            f"Entered Data: {json.dumps(memory_context.get('entered_data', {}))}",
-            f"Visited URLs: {json.dumps(memory_context.get('visited_urls', []))}",
-            f"Current Step: {memory_context.get('current_step', 0)}",
+            memory_context,
+            "",
+            "## What action should be taken next?",
         ]
-
-        # Add recent actions if any
-        recent_actions = memory_context.get('recent_actions', [])
-        if recent_actions:
-            sections.append("\nRecent Actions:")
-            for action in recent_actions:
-                status = "OK" if action.get('success') else "FAIL"
-                sections.append(f"  [{status}] Step {action.get('step')}: {action.get('action')}")
-
-        sections.append("\n## What action should be taken next?")
 
         return "\n".join(sections)
 
@@ -241,7 +240,7 @@ class LLMClient:
                 "action": plan.get("action", "none"),
                 "params": plan.get("params", {}),
                 "reasoning": plan.get("reasoning", ""),
-                "goal_status": plan.get("goal_status", "in_progress"),
+                "goal_status": plan.get("goal_status", GoalStatus.IN_PROGRESS),
                 "missing_fields": plan.get("missing_fields", [])
             }
 
@@ -251,7 +250,7 @@ class LLMClient:
                 "action": "none",
                 "params": {},
                 "reasoning": f"Failed to parse response: {content[:200]}",
-                "goal_status": "blocked",
+                "goal_status": GoalStatus.BLOCKED,
                 "missing_fields": []
             }
 

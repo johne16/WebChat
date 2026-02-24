@@ -168,7 +168,7 @@ async def test_generate_plan_success():
         result = await client.generate_plan(
             goal="Sign up",
             page_context="## Current Page\nURL: http://example.com",
-            memory_context={"entered_data": {}, "visited_urls": []},
+            memory_context="## Session Memory\nEntered Data: {}\nVisited URLs: []\nCurrent Step: 0",
             user_profile={"email": "test@example.com"}
         )
 
@@ -192,7 +192,7 @@ async def test_generate_plan_api_error():
         result = await client.generate_plan(
             goal="Sign up",
             page_context="Page",
-            memory_context={},
+            memory_context="## Session Memory\nEntered Data: {}\nVisited URLs: []\nCurrent Step: 0",
             user_profile={}
         )
 
@@ -232,17 +232,19 @@ def test_build_planning_context():
     with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", "[]"]):
         client = LLMClient(api_key="test-key")
 
+        memory_str = (
+            "## Session Memory\n"
+            'Entered Data: {"email": "test@example.com"}\n'
+            'Visited URLs: ["http://example.com"]\n'
+            "Current Step: 2\n"
+            "\nRecent Actions:\n"
+            "  [OK] Step 1: fill_form"
+        )
+
         context = client._build_planning_context(
             goal="Sign up and sign in",
             page_context="## Current Page\nURL: http://example.com",
-            memory_context={
-                "entered_data": {"email": "test@example.com"},
-                "visited_urls": ["http://example.com"],
-                "current_step": 2,
-                "recent_actions": [
-                    {"step": 1, "action": "fill_form", "success": True}
-                ]
-            },
+            memory_context=memory_str,
             user_profile={"email": "test@example.com"}
         )
 
@@ -310,7 +312,7 @@ async def test_generate_plan_needs_input():
         result = await client.generate_plan(
             goal="Sign up",
             page_context="## Current Page\nURL: http://example.com",
-            memory_context={},
+            memory_context="## Session Memory\nEntered Data: {}\nVisited URLs: []\nCurrent Step: 0",
             user_profile={"email": "test@example.com"}
         )
 
@@ -338,7 +340,7 @@ async def test_generate_plan_awaiting_user_action():
         result = await client.generate_plan(
             goal="Sign up",
             page_context="## Current Page\nURL: http://example.com",
-            memory_context={},
+            memory_context="## Session Memory\nEntered Data: {}\nVisited URLs: []\nCurrent Step: 0",
             user_profile={}
         )
 

@@ -1,8 +1,137 @@
 """Playwright browser wrapper with HTML preprocessing for form extraction"""
 
 import json
+import logging
+import time
 from typing import Optional, Dict, Any
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, TimeoutError
+
+
+logger = logging.getLogger(__name__)
+
+# JavaScript extraction scripts
+JS_EXTRACT_FORMS = """
+() => {
+    const forms = Array.from(document.querySelectorAll('form'));
+
+    const formData = forms.map(form => {
+        const fields = Array.from(form.querySelectorAll(
+            'input:not([type="hidden"]), select, textarea'
+        )).map(field => {
+            let label = '';
+            if (field.id) {
+                const labelEl = document.querySelector(`label[for="${field.id}"]`);
+                if (labelEl) {
+                    label = labelEl.textContent.trim();
+                }
+            }
+            if (!label && field.closest('label')) {
+                label = field.closest('label').textContent.trim();
+            }
+
+            const fieldData = {
+                tag: field.tagName.toLowerCase(),
+                type: field.type || '',
+                id: field.id || '',
+                name: field.name || '',
+                placeholder: field.placeholder || '',
+                required: field.required,
+                label: label,
+                value: field.value || ''
+            };
+
+            if (field.type === 'radio' || field.type === 'checkbox') {
+                fieldData.checked = field.checked;
+            }
+            if (field.tagName === 'SELECT') {
+                fieldData.options = Array.from(field.options).map(o => ({
+                    value: o.value,
+                    text: o.textContent.trim(),
+                    selected: o.selected
+                }));
+            }
+
+            return fieldData;
+        });
+
+        const buttons = Array.from(form.querySelectorAll(
+            'button, input[type="submit"], input[type="button"]'
+        )).map(btn => ({
+            type: btn.type,
+            text: btn.textContent || btn.value || '',
+            id: btn.id || '',
+            name: btn.name || ''
+        }));
+
+        return {
+            action: form.action,
+            method: form.method,
+            id: form.id || '',
+            fields: fields,
+            buttons: buttons
+        };
+    });
+
+    return JSON.stringify(formData);
+}
+"""
+
+JS_EXTRACT_LINKS = """
+() => {
+    const links = Array.from(document.querySelectorAll('a[href]'))
+        .filter(a => {
+            const rect = a.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+        })
+        .map(a => ({
+            text: a.textContent.trim().substring(0, 100),
+            href: a.href,
+            id: a.id || '',
+            className: a.className || ''
+        }))
+        .filter(l => l.text);
+
+    return JSON.stringify(links);
+}
+"""
+
+JS_EXTRACT_BUTTONS = """
+() => {
+    const buttons = Array.from(document.querySelectorAll('button, input[type="button"]'))
+        .filter(btn => {
+            if (btn.closest('form')) return false;
+            const rect = btn.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+        })
+        .map(btn => ({
+            text: (btn.textContent || btn.value || '').trim().substring(0, 100),
+            id: btn.id || '',
+            className: btn.className || '',
+            type: btn.type || 'button'
+        }))
+        .filter(b => b.text);
+
+    return JSON.stringify(buttons);
+}
+"""
+
+JS_EXTRACT_CONTENT = """
+() => {
+    const clone = document.body.cloneNode(true);
+    clone.querySelectorAll('script, style, noscript, iframe').forEach(el => el.remove());
+
+    let text = clone.innerText || clone.textContent || '';
+    text = text.replace(/\\s+/g, ' ').trim();
+
+    if (text.length > 3000) {
+        text = text.substring(0, 3000) + '...';
+    }
+
+    return text;
+}
+"""
+
+JS_SCROLL = "window.scrollBy(0, {amount})"
 
 
 class BrowserManager:
@@ -38,28 +167,28 @@ class BrowserManager:
         """Check if browser is currently running"""
         return self.browser is not None and self.browser.is_connected()
 
-    async def navigate(self, url: str) -> bool:
+    async def navigate(self, url: str) -> Dict[str, Any]:
         """Navigate to URL
 
         Args:
             url: Target URL
 
         Returns:
-            True if navigation successful, False otherwise
+            {"success": bool, "error": {"type": str, "message": str, "details": dict} | None}
         """
         try:
             await self.page.goto(url, wait_until="networkidle")
-            return True
-        except TimeoutError:
-            return False
-        except Exception:
-            return False
+            return {"success": True, "error": None}
+        except TimeoutError as e:
+            return {"success": False, "error": {"type": "timeout_error", "message": str(e), "details": {"url": url}}}
+        except Exception as e:
+            return {"success": False, "error": {"type": "navigation_error", "message": str(e), "details": {"url": url}}}
 
     async def get_raw_html(self) -> str:
         """Get full page HTML"""
         return await self.page.content()
 
-    async def get_form_elements(self) -> str:
+    async def get_form_elements(self) -> Optional[str]:
         """Extract and preprocess form elements
 
         Strategy:
@@ -69,87 +198,11 @@ class BrowserManager:
         4. Measure token reduction (rough estimate: 1 token ≈ 4 characters)
 
         Returns:
-            Preprocessed form HTML string
+            Preprocessed form HTML string, or None if no forms found
         """
         from src.config import config
-        # JavaScript extraction script runs in browser context
-        extraction_script = """
-        () => {
-            const forms = Array.from(document.querySelectorAll('form'));
-
-            const formData = forms.map(form => {
-                const fields = Array.from(form.querySelectorAll(
-                    'input:not([type="hidden"]), select, textarea'
-                )).map(field => {
-                    // Get associated label
-                    let label = '';
-                    if (field.id) {
-                        const labelEl = document.querySelector(`label[for="${field.id}"]`);
-                        if (labelEl) {
-                            label = labelEl.textContent.trim();
-                        }
-                    }
-
-                    // If no label found via for attribute, check if field is inside a label
-                    if (!label && field.closest('label')) {
-                        label = field.closest('label').textContent.trim();
-                    }
-
-                    // Extract minimal necessary attributes
-                    const fieldData = {
-                        tag: field.tagName.toLowerCase(),
-                        type: field.type || '',
-                        id: field.id || '',
-                        name: field.name || '',
-                        placeholder: field.placeholder || '',
-                        required: field.required,
-                        label: label,
-                        value: field.value || ''
-                    };
-
-                    // For radio buttons and checkboxes, include checked state
-                    if (field.type === 'radio' || field.type === 'checkbox') {
-                        fieldData.checked = field.checked;
-                    }
-
-                    // For select elements, include options with selected state
-                    if (field.tagName === 'SELECT') {
-                        fieldData.options = Array.from(field.options).map(o => ({
-                            value: o.value,
-                            text: o.textContent.trim(),
-                            selected: o.selected
-                        }));
-                    }
-
-                    return fieldData;
-                });
-
-                // Extract buttons
-                const buttons = Array.from(form.querySelectorAll(
-                    'button, input[type="submit"], input[type="button"]'
-                )).map(btn => ({
-                    type: btn.type,
-                    text: btn.textContent || btn.value || '',
-                    id: btn.id || '',
-                    name: btn.name || ''
-                }));
-
-                return {
-                    action: form.action,
-                    method: form.method,
-                    id: form.id || '',
-                    fields: fields,
-                    buttons: buttons
-                };
-            });
-
-            return JSON.stringify(formData);
-        }
-        """
-
-        # Execute extraction script
         try:
-            result = await self.page.evaluate(extraction_script)
+            result = await self.page.evaluate(JS_EXTRACT_FORMS)
             form_data = json.loads(result)
 
             # Convert to LLM-friendly format
@@ -166,30 +219,30 @@ class BrowserManager:
                 if raw_tokens > 0:
                     reduction_pct = ((raw_tokens - preprocessed_tokens) / raw_tokens) * 100
 
-                    print(f"\n[BROWSER] HTML Preprocessing Metrics:")
-                    print(f"  Raw HTML: {len(raw_html):,} chars (~{raw_tokens:.0f} tokens)")
-                    print(f"  Preprocessed: {len(preprocessed_html):,} chars (~{preprocessed_tokens:.0f} tokens)")
-                    print(f"  Token Reduction: {reduction_pct:.1f}%\n")
+                    logger.debug(f"[BROWSER] HTML Preprocessing Metrics:")
+                    logger.debug(f"  Raw HTML: {len(raw_html):,} chars (~{raw_tokens:.0f} tokens)")
+                    logger.debug(f"  Preprocessed: {len(preprocessed_html):,} chars (~{preprocessed_tokens:.0f} tokens)")
+                    logger.debug(f"  Token Reduction: {reduction_pct:.1f}%")
 
             return preprocessed_html
 
         except Exception as e:
             # Fallback to raw HTML if extraction fails
             if config.DEBUG:
-                print(f"[BROWSER] Extraction failed, using raw HTML: {str(e)}")
+                logger.debug(f"[BROWSER] Extraction failed, using raw HTML: {str(e)}")
             return await self.get_raw_html()
 
-    def _format_for_llm(self, form_data: list) -> str:
+    def _format_for_llm(self, form_data: list) -> Optional[str]:
         """Convert extracted form data to readable pseudo-HTML
 
         Args:
             form_data: List of form dictionaries
 
         Returns:
-            Compact, readable HTML representation
+            Compact, readable HTML representation, or None if no forms
         """
         if not form_data:
-            return "<p>No forms found on page</p>"
+            return None
 
         output = []
 
@@ -247,7 +300,7 @@ class BrowserManager:
             {
                 "success": bool,
                 "result": any,
-                "error": str | None
+                "error": {"type": str, "message": str, "details": dict} | None
             }
         """
         try:
@@ -261,7 +314,11 @@ class BrowserManager:
             return {
                 "success": False,
                 "result": None,
-                "error": str(e)
+                "error": {
+                    "type": "js_execution_error",
+                    "message": str(e),
+                    "details": {}
+                }
             }
 
     async def wait_for_navigation(self, timeout: int = 5000) -> bool:
@@ -293,38 +350,18 @@ class BrowserManager:
         """
         await self.page.screenshot(path=path)
 
-    async def get_page_links(self) -> str:
+    async def get_page_links(self) -> Optional[str]:
         """Extract all clickable links from the page
 
         Returns:
-            Formatted string of links with text and href
+            Formatted string of links with text and href, or None if no links
         """
-        extraction_script = """
-        () => {
-            const links = Array.from(document.querySelectorAll('a[href]'))
-                .filter(a => {
-                    // Filter out invisible links
-                    const rect = a.getBoundingClientRect();
-                    return rect.width > 0 && rect.height > 0;
-                })
-                .map(a => ({
-                    text: a.textContent.trim().substring(0, 100),  // Limit text length
-                    href: a.href,
-                    id: a.id || '',
-                    className: a.className || ''
-                }))
-                .filter(l => l.text);  // Only links with text
-
-            return JSON.stringify(links);
-        }
-        """
-
         try:
-            result = await self.page.evaluate(extraction_script)
+            result = await self.page.evaluate(JS_EXTRACT_LINKS)
             links = json.loads(result)
 
             if not links:
-                return "No links found on page"
+                return None
 
             output = ["Links on page:"]
             for link in links:
@@ -334,43 +371,20 @@ class BrowserManager:
             return "\n".join(output)
 
         except Exception as e:
-            return f"Error extracting links: {str(e)}"
+            return None
 
-    async def get_page_buttons(self) -> str:
+    async def get_page_buttons(self) -> Optional[str]:
         """Extract all buttons (not in forms) from the page
 
         Returns:
-            Formatted string of buttons
+            Formatted string of buttons, or None if no buttons
         """
-        extraction_script = """
-        () => {
-            // Get buttons that are NOT inside a form
-            const buttons = Array.from(document.querySelectorAll('button, input[type="button"]'))
-                .filter(btn => {
-                    // Exclude buttons inside forms
-                    if (btn.closest('form')) return false;
-                    // Filter out invisible buttons
-                    const rect = btn.getBoundingClientRect();
-                    return rect.width > 0 && rect.height > 0;
-                })
-                .map(btn => ({
-                    text: (btn.textContent || btn.value || '').trim().substring(0, 100),
-                    id: btn.id || '',
-                    className: btn.className || '',
-                    type: btn.type || 'button'
-                }))
-                .filter(b => b.text);
-
-            return JSON.stringify(buttons);
-        }
-        """
-
         try:
-            result = await self.page.evaluate(extraction_script)
+            result = await self.page.evaluate(JS_EXTRACT_BUTTONS)
             buttons = json.loads(result)
 
             if not buttons:
-                return "No standalone buttons found on page"
+                return None
 
             output = ["Buttons on page (outside forms):"]
             for btn in buttons:
@@ -380,7 +394,7 @@ class BrowserManager:
             return "\n".join(output)
 
         except Exception as e:
-            return f"Error extracting buttons: {str(e)}"
+            return None
 
     async def get_readable_content(self) -> str:
         """Extract main readable text content from the page
@@ -388,33 +402,12 @@ class BrowserManager:
         Returns:
             Main text content, cleaned and truncated
         """
-        extraction_script = """
-        () => {
-            // Remove script and style elements
-            const clone = document.body.cloneNode(true);
-            clone.querySelectorAll('script, style, noscript, iframe').forEach(el => el.remove());
-
-            // Get text content
-            let text = clone.innerText || clone.textContent || '';
-
-            // Clean up whitespace
-            text = text.replace(/\\s+/g, ' ').trim();
-
-            // Truncate to reasonable length
-            if (text.length > 3000) {
-                text = text.substring(0, 3000) + '...';
-            }
-
-            return text;
-        }
-        """
-
         try:
-            result = await self.page.evaluate(extraction_script)
-            return result or "No readable content found"
+            result = await self.page.evaluate(JS_EXTRACT_CONTENT)
+            return result or ""
 
         except Exception as e:
-            return f"Error extracting content: {str(e)}"
+            return ""
 
     async def get_page_title(self) -> str:
         """Get the page title
@@ -424,17 +417,17 @@ class BrowserManager:
         """
         return await self.page.title()
 
-    async def go_back(self) -> bool:
+    async def go_back(self) -> Dict[str, Any]:
         """Navigate back in browser history
 
         Returns:
-            True if navigation successful, False otherwise
+            {"success": bool, "error": {"type": str, "message": str, "details": dict} | None}
         """
         try:
             await self.page.go_back(wait_until="networkidle")
-            return True
-        except Exception:
-            return False
+            return {"success": True, "error": None}
+        except Exception as e:
+            return {"success": False, "error": {"type": "navigation_error", "message": str(e), "details": {}}}
 
     async def scroll(self, direction: str = "down", amount: int = 500) -> None:
         """Scroll the page
@@ -444,7 +437,62 @@ class BrowserManager:
             amount: Pixels to scroll
         """
         scroll_amount = amount if direction == "down" else -amount
-        await self.page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+        await self.page.evaluate(JS_SCROLL.format(amount=scroll_amount))
+
+    async def build_page_context(self) -> Dict[str, Any]:
+        """Build page context string for LLM
+
+        Returns:
+            Dict with context string, timings, and page context size
+        """
+        t0 = time.perf_counter()
+
+        url = self.page.url
+        title = await self.get_page_title()
+        forms = await self.get_form_elements()
+        links = await self.get_page_links()
+        buttons = await self.get_page_buttons()
+        content = await self.get_readable_content()
+
+        sections = [
+            "## Current Page",
+            f"URL: {url}",
+            f"Title: {title}",
+            "",
+            "## Page Content",
+            content,
+            "",
+        ]
+
+        if forms is not None:
+            sections.extend([
+                "## Forms on Page",
+                forms,
+                "",
+            ])
+
+        if links is not None:
+            sections.extend([
+                "## Available Links",
+                links,
+                "",
+            ])
+
+        if buttons is not None:
+            sections.extend([
+                "## Available Buttons",
+                buttons,
+                "",
+            ])
+
+        context = "\n".join(sections)
+        elapsed = time.perf_counter() - t0
+
+        return {
+            "context": context,
+            "timings": {"pageExtraction": elapsed},
+            "pageContextSize": len(context)
+        }
 
     async def close(self) -> None:
         """Close browser and cleanup"""

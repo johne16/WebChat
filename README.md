@@ -1,15 +1,15 @@
-# Web.Chat — Developer README
+# WebChat — Developer README
 
 ## Overview
 
-Web.Chat is a Chromium extension that adds an AI-powered side panel to help users explore and understand web pages. It connects to a local server that relays requests to OpenAI, Brave Search, Crawl4AI, and can spawn autonomous web agents for form automation tasks.
+WebChat is a Chromium extension that adds an AI-powered side panel to help users explore and understand web pages. It connects to a local server that relays requests to OpenAI, Anthropic, Brave Search, Crawl4AI, and can spawn autonomous web agents for form automation tasks.
 
 ## Prerequisites
 
 * **Node.js** and **npm** installed
 * Chromium-based browser (Chrome, Brave, Edge)
 * **Docker** installed and running (required for Crawl4AI)
-* **Python 3.10+** with the WEB_AGENT project set up (required for Agent Mode)
+* **Python 3.13+** with dependencies from `web_agent/requirements.txt` (required for Agent Mode)
 
 ## Setup
 
@@ -18,14 +18,14 @@ Web.Chat is a Chromium extension that adds an AI-powered side panel to help user
 2. Create an environment file at `./server/.env`:
    ```
    OPENAI_API_KEY=your_openai_api_key_here
+   ANTHROPIC_API_KEY=your_anthropic_api_key_here  # optional
    BRAVE_SEARCH_API_KEY=your_brave_search_api_key_here
    PORT=8787
-   WEB_AGENT_PATH=C:\Users\John\PycharmProjects\WEB_AGENT
    ```
 
    **Notes:**
    - Get your Brave Search API key from [https://brave.com/search/api/](https://brave.com/search/api/)
-   - `WEB_AGENT_PATH` should point to your WEB_AGENT project directory
+   - `ANTHROPIC_API_KEY` is only needed if you select an Anthropic model in settings
 
 3. Install server dependencies:
    ```bash
@@ -33,15 +33,15 @@ Web.Chat is a Chromium extension that adds an AI-powered side panel to help user
    npm install
    ```
 
-4. Install WEB_AGENT dependencies:
+4. Install web agent dependencies:
    ```bash
-   cd path/to/WEB_AGENT
+   cd web_agent
    pip install -r requirements.txt
    ```
 
 ## Running the Extension
 
-The extension requires two services running. Start each in a separate terminal:
+The extension requires three services running. Start each in a separate terminal:
 
 ### Terminal 1: Crawl4AI
 
@@ -59,10 +59,17 @@ npm start
 ```
 
 The server listens on port 8787 (configurable via `.env`). It handles:
-- OpenAI API proxying
+- LLM API proxying (OpenAI and Anthropic)
 - Brave Search proxying
 - Crawl4AI proxying
 - **Agent process spawning and management** (agents are now spawned on-demand, not manually)
+
+### Terminal 3: Web Agent (for Agent Mode)
+
+```bash
+cd web_agent
+python -m src.agent_service
+```
 
 ## Installing the Extension
 
@@ -70,7 +77,7 @@ The server listens on port 8787 (configurable via `.env`). It handles:
 2. Enable **Developer mode** (toggle at top right)
 3. Click **Load unpacked**
 4. Select the `./extension` directory
-5. The extension appears as **Web.Chat**
+5. The extension appears as **WebChat**
 
 **Keyboard shortcut:** `Ctrl+Shift+Y` (Windows) / `Command+Shift+Y` (Mac)
 
@@ -91,22 +98,24 @@ The server listens on port 8787 (configurable via `.env`). It handles:
 └───────┬─────────────────┬────────────┬─────────────┬────────┘
         │                 │            │             │
         ▼                 ▼            ▼             ▼
-   OpenAI API       Crawl4AI      Brave Search   WEB_AGENT
-   (cloud)          :11235        (cloud)        :5001-5005
-                    (Docker)                     (spawned by server)
+   OpenAI /          Crawl4AI      Brave Search   web_agent
+   Anthropic API     :11235        (cloud)        :5001-5005
+   (cloud)           (Docker)                     (spawned by server)
 ```
 
 ### Request Flow
 
-Web.Chat uses **automatic intent detection** to route your message to the right handler. No mode toggles needed.
+WebChat uses **automatic intent detection** to route your message to the right handler. No mode toggles needed.
 
 **Unified Flow:**
 1. User sends message via panel
 2. Intent detection (heuristic + LLM) classifies the request:
-   - **Simple**: Questions about current page → crawl page, send to OpenAI
+   - **Simple**: Questions about current page → crawl page, send to LLM
    - **Research**: Questions needing web search → ReAct loop with Brave Search
    - **Agent**: Action requests (sign up, fill forms) → spawn agent with confirmation
 3. Response displayed (agent tasks show real-time status via SSE)
+
+Progress for research and agent tasks is shown in the header bar rather than inline step messages.
 
 **Intent Detection:**
 - Heuristic bypass for obvious cases (questions starting with "what/why/how", references to "this page")
@@ -129,7 +138,13 @@ Web.Chat uses **automatic intent detection** to route your message to the right 
 Echoes user input without API calls. Toggle via settings (⚙️).
 
 ### LLM Model
-Select the OpenAI model to use. Configure via settings (⚙️).
+Select the provider and model via settings (⚙️). The settings page presents a grid with OpenAI and Anthropic columns across Small, Mid, and Large tiers:
+
+| Tier | OpenAI | Anthropic |
+|------|--------|-----------|
+| Small | gpt-5-nano | claude-haiku-4-5 |
+| Mid | gpt-5-mini | claude-sonnet-4-6 |
+| Large | gpt-5 | claude-opus-4-6 |
 
 ### User Profile
 Encrypted profile for agent automation. Manage via Settings → Manage Profile.
@@ -138,15 +153,15 @@ Encrypted profile for agent automation. Manage via Settings → Manage Profile.
 
 ### How It Works
 
-Web.Chat automatically detects when you want to perform an action on a website and offers to spawn an agent.
+WebChat automatically detects when you want to perform an action on a website and offers to spawn an agent.
 
 1. Type a request: "Sign me up at https://example.com" or "Register me on ABC Power"
-2. Web.Chat detects this as an agent task and asks for confirmation
+2. WebChat detects this as an agent task and asks for confirmation
 3. If your profile is locked, you'll be prompted for your passphrase
 4. Say "yes" to proceed
 5. The server spawns an agent on an available port (5001-5005)
 6. The agent opens a browser window and executes the task
-7. Real-time status updates appear in the chat via SSE
+7. Real-time status updates appear in the header bar via SSE
 8. When complete, the agent process is automatically killed
 
 ### Agent Configuration
@@ -182,25 +197,43 @@ Profile data is encrypted with AES-256-GCM (PBKDF2, 100k iterations). Passphrase
 │   ├── agent.js               # Agent session management, profile handling
 │   ├── agentClient.js         # Web agent API client + SSE
 │   ├── background.js          # Extension lifecycle, tab tracking
-│   ├── contentScript.js       # DEPRECATED
+│   ├── config.js              # Shared config (SERVER_BASE)
 │   ├── crypto.js              # AES-256-GCM encryption
-│   ├── extraction.js          # DEPRECATED
 │   ├── icons/                 # Extension icons
 │   ├── intent.js              # Intent detection (heuristic + LLM)
-│   ├── llmClient.js           # OpenAI client + ReAct functions
+│   ├── llmClient.js           # LLM client (OpenAI + Anthropic) + ReAct functions
 │   ├── manifest.json          # Extension configuration
-│   ├── options.html/css/js    # Settings page
+│   ├── options.html/css/js    # Settings page (model grid, testing toggle)
 │   ├── panel.html/css/js      # Side panel UI (main entry point)
 │   ├── profile.html/css/js    # Profile management
 │   ├── react.js               # ReAct loop orchestrator
 │   ├── searchClient.js        # Brave Search client
-│   └── ui.js                  # UI rendering (messages, forms, banners)
-└── server/
-    ├── .env                   # API keys, config
-    ├── database.js            # SQLite database module
-    ├── data/webchat.db        # SQLite database file
-    ├── package.json
-    └── server.js              # Express server + agent process manager + SSE
+│   ├── test-progress.html     # Progress indicator test page
+│   ├── ui.js                  # UI rendering (messages, forms, banners, header progress)
+│   └── utils.js               # Shared utilities (crawlPage, parseJsonFromLLM)
+├── server/
+│   ├── .env                   # API keys, config
+│   ├── agentManager.js        # Agent process lifecycle (spawn, kill, health check)
+│   ├── config.js              # Centralized configuration constants
+│   ├── conversationHistory.js # In-memory conversation history (4000 token rolling window)
+│   ├── database.js            # SQLite database module
+│   ├── data/webchat.db        # SQLite database file
+│   ├── package.json
+│   ├── providers/
+│   │   ├── openai.js          # OpenAI provider adapter
+│   │   └── anthropic.js       # Anthropic provider adapter
+│   ├── routes/
+│   │   ├── proxy.js           # LLM, Crawl4AI, Brave Search proxy endpoints
+│   │   ├── agent.js           # Agent management endpoints
+│   │   └── database.js        # Database CRUD endpoints
+│   ├── server.js              # Main Express app (imports route modules)
+│   └── sseManager.js          # SSE state management
+├── web_agent/                 # Autonomous web agent (Python/FastAPI)
+│   ├── src/                   # Agent modules
+│   ├── prompts/               # LLM planning prompts
+│   ├── tests/                 # Unit and integration tests
+│   └── README.md              # Web agent documentation
+└── notes/                     # Planning and analysis notes
 ```
 
 ## Server Endpoints
@@ -209,9 +242,10 @@ Profile data is encrypted with AES-256-GCM (PBKDF2, 100k iterations). Passphrase
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/api/openai/chat` | POST | Proxy to OpenAI |
+| `/api/openai/chat` | POST | Proxy to LLM (OpenAI or Anthropic via `provider` field) |
 | `/api/crawl` | POST | Proxy to Crawl4AI |
 | `/api/search` | POST | Proxy to Brave Search |
+| `/api/history/add` | POST | Manually add conversation turns to in-memory history |
 | `/api/agent/start` | POST | Spawn new agent process |
 | `/api/agent/execute-goal` | POST | Execute goal on agent |
 | `/api/agent/continue` | POST | Continue paused session |
@@ -233,9 +267,6 @@ Profile data is encrypted with AES-256-GCM (PBKDF2, 100k iterations). Passphrase
 | `/api/db/site-data` | GET | Get site-specific data |
 | `/api/db/site-data` | POST | Add/update site data |
 | `/api/db/site-data` | DELETE | Delete site data |
-| `/api/db/conversations` | GET | Get conversation history |
-| `/api/db/conversations` | POST | Add conversation message |
-| `/api/db/conversations` | DELETE | Clear conversations |
 | `/api/db/learned` | GET | Get learned context |
 | `/api/db/learned` | POST | Add learned fact |
 | `/api/db/learned/:id` | DELETE | Delete learned fact |
@@ -283,18 +314,7 @@ CREATE TABLE site_data (
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- Conversation history
-CREATE TABLE conversations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    role TEXT NOT NULL,  -- 'user' or 'assistant'
-    content TEXT NOT NULL,
-    url TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
--- Learned context (facts the assistant remembers)
+-- Learned context
 CREATE TABLE learned_context (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -308,7 +328,7 @@ CREATE TABLE learned_context (
 **Design notes:**
 - `profile.extra_fields` is JSON for flexibility—avoids schema changes when new fields are learned
 - `site_data` is key-value per domain—handles arbitrary site-specific credentials
-- `learned_context` stores facts for potential future optimization (e.g., reducing token usage by referencing stored facts)
+- Conversation history is managed in-memory (rolling 4000-token window) rather than in the database
 - All tables have `user_id` foreign key for future multi-user support
 
 ## Testing
@@ -460,14 +480,11 @@ CREATE TABLE learned_context (
 2. Start server: `cd server && npm start`
 3. Load extension in browser
 4. Verify Testing Mode echo works
-5. Toggle to AI Mode, verify OpenAI responses
-6. Toggle Research Mode, verify Brave Search + iterative reasoning
-
-**Note:** Agent Mode UI is temporarily broken (server API updated, extension not yet updated). Test agent spawning via curl commands above.
+5. Send a question about the current page and confirm intent detection routes to simple chat
+6. Ask a research question and verify Brave Search + iterative reasoning via ReAct
 
 ## Common Issues
 
 * **`node_modules/` missing:** Run `npm install` in `./server`
-* **Agent spawn fails:** Check `WEB_AGENT_PATH` in `.env` points to correct directory
 * **Crawl4AI errors:** Ensure Docker container is running on port 11235
 * **Extension not updating:** Reload extension at `chrome://extensions` after code changes

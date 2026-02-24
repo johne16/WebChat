@@ -28,7 +28,7 @@ class TestSessionMemory:
 
         assert memory.session_id is not None
         assert len(memory.session_id) == 36  # UUID format
-        assert memory.status == "in_progress"
+        assert memory.status == "in_progress"  # GoalStatus.IN_PROGRESS == "in_progress"
         assert memory.current_step == 0
 
     def test_create_session_with_id(self, temp_db):

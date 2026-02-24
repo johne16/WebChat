@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Web.Chat",
+  "name": "WebChat",
   "version": "0.0.1",
   "description": "An AI-powered side panel that understands your pages and helps you explore deeper.",
   "icons": {
@@ -22,7 +22,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Web.Chat"
+    "default_title": "WebChat"
   },
   "commands": {
     "toggle-panel": {

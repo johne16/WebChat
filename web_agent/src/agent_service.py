@@ -1,24 +1,53 @@
 """FastAPI server for Autonomous Web Agent"""
 
 import argparse
+import asyncio
+import logging
+from dataclasses import dataclass
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, List, Any
 import uvicorn
 
-from src.config import config
+from src.config import config, GoalStatus
+
+logger = logging.getLogger(__name__)
 from src.web_agent import AutonomousWebAgent
 
-# CLI arguments (set at startup)
-cli_args = argparse.Namespace(
-    port=None,
-    callback_url=None,
-    database_path=None
-)
 
-# Active agents keyed by session_id (keeps browser alive between requests)
-active_agents: Dict[str, AutonomousWebAgent] = {}
+@dataclass
+class AppConfig:
+    """CLI configuration stored on app.state"""
+    port: Optional[int] = None
+    callback_url: Optional[str] = None
+    database_path: Optional[str] = None
+
+class AgentManager:
+    """Thread-safe manager for active agent instances"""
+
+    def __init__(self):
+        self._agents: Dict[str, AutonomousWebAgent] = {}
+        self._lock = asyncio.Lock()
+
+    async def get(self, session_id: str) -> Optional[AutonomousWebAgent]:
+        async with self._lock:
+            return self._agents.get(session_id)
+
+    async def set(self, session_id: str, agent: AutonomousWebAgent) -> None:
+        async with self._lock:
+            self._agents[session_id] = agent
+
+    async def remove(self, session_id: str) -> None:
+        async with self._lock:
+            self._agents.pop(session_id, None)
+
+    async def has(self, session_id: str) -> bool:
+        async with self._lock:
+            return session_id in self._agents
+
+
+agent_manager = AgentManager()
 
 
 # Pydantic models for request/response validation
@@ -113,64 +142,15 @@ class ContinueSessionRequest(BaseModel):
     )
 
 
-# Create FastAPI app
-app = FastAPI(
-    title="Autonomous Web Agent API",
-    description="Goal-driven web automation using LLM planning",
-    version="2.0.0"
-)
-
-
-@app.post("/api/execute-goal", response_model=ExecuteGoalResponse)
-async def execute_goal(request: ExecuteGoalRequest):
-    """Execute a natural language goal autonomously
+def _build_response(result: Dict[str, Any]) -> ExecuteGoalResponse:
+    """Convert raw agent result dict into ExecuteGoalResponse
 
     Args:
-        request: Goal execution request
+        result: Raw result dict from AutonomousWebAgent.execute_goal()
 
     Returns:
-        Structured response with results, action history, and memory
+        ExecuteGoalResponse with validated fields
     """
-    # Create agent instance (with optional session resume)
-    db_path = Path(cli_args.database_path) if cli_args.database_path else None
-
-    agent = AutonomousWebAgent(
-        session_id=request.sessionId,
-        db_path=db_path,
-        callback_url=cli_args.callback_url,
-        port=cli_args.port,
-        task_id=request.sessionId  # Use sessionId as taskId for now
-    )
-
-    # Convert UserProfile to dict
-    user_profile_dict = request.userProfile.model_dump(exclude_none=True)
-
-    # Build options
-    options = {}
-    if request.options:
-        options = {
-            "max_steps": request.options.maxSteps,
-            "timeout": request.options.timeout,
-            "headless": request.options.headless
-        }
-
-    # Execute goal
-    result = await agent.execute_goal(
-        goal=request.goal,
-        start_url=request.startUrl,
-        user_profile=user_profile_dict,
-        options=options
-    )
-
-    # Keep agent alive if awaiting user action or needs input
-    session_id = result.get("sessionId")
-    if result.get("awaitingUserAction") or result.get("needsInput"):
-        active_agents[session_id] = agent
-    elif session_id in active_agents:
-        # Clean up completed/failed agent
-        del active_agents[session_id]
-
-    # Convert action history
     action_history = []
     for action in result.get("actionHistory", []):
         action_history.append(ActionHistoryItem(
@@ -182,7 +162,6 @@ async def execute_goal(request: ExecuteGoalRequest):
             timestamp=action.get("timestamp", "")
         ))
 
-    # Convert errors
     errors = []
     for error in result.get("errors", []):
         errors.append(ErrorDetail(
@@ -192,7 +171,6 @@ async def execute_goal(request: ExecuteGoalRequest):
             details=error.get("details")
         ))
 
-    # Build memory summary
     memory_data = result.get("memory", {})
     memory = MemorySummary(
         enteredData=memory_data.get("enteredData", {}),
@@ -219,8 +197,68 @@ async def execute_goal(request: ExecuteGoalRequest):
     )
 
 
+# Create FastAPI app
+app = FastAPI(
+    title="Autonomous Web Agent API",
+    description="Goal-driven web automation using LLM planning",
+    version="2.0.0"
+)
+
+
+@app.post("/api/execute-goal", response_model=ExecuteGoalResponse)
+async def execute_goal(request: ExecuteGoalRequest, raw_request: Request):
+    """Execute a natural language goal autonomously
+
+    Args:
+        request: Goal execution request
+
+    Returns:
+        Structured response with results, action history, and memory
+    """
+    # Create agent instance (with optional session resume)
+    app_config: AppConfig = raw_request.app.state.app_config
+    db_path = Path(app_config.database_path) if app_config.database_path else None
+
+    agent = AutonomousWebAgent(
+        session_id=request.sessionId,
+        db_path=db_path,
+        callback_url=app_config.callback_url,
+        port=app_config.port,
+        task_id=request.sessionId  # Use sessionId as taskId for now
+    )
+
+    # Convert UserProfile to dict
+    user_profile_dict = request.userProfile.model_dump(exclude_none=True)
+
+    # Build options
+    options = {}
+    if request.options:
+        options = {
+            "max_steps": request.options.maxSteps,
+            "timeout": request.options.timeout,
+            "headless": request.options.headless
+        }
+
+    # Execute goal
+    result = await agent.execute_goal(
+        goal=request.goal,
+        start_url=request.startUrl,
+        user_profile=user_profile_dict,
+        options=options
+    )
+
+    # Keep agent alive if awaiting user action or needs input
+    session_id = result.get("sessionId")
+    if result.get("awaitingUserAction") or result.get("needsInput"):
+        await agent_manager.set(session_id, agent)
+    else:
+        await agent_manager.remove(session_id)
+
+    return _build_response(result)
+
+
 @app.post("/api/session/{session_id}/continue", response_model=ExecuteGoalResponse)
-async def continue_session(session_id: str, request: ContinueSessionRequest):
+async def continue_session(session_id: str, request: ContinueSessionRequest, raw_request: Request):
     """Continue a paused session with additional user data
 
     Use this endpoint when a previous request returned needsInput=true.
@@ -236,14 +274,15 @@ async def continue_session(session_id: str, request: ContinueSessionRequest):
     from src.memory import SessionMemory
 
     # Check if we have an active agent with browser still open
-    if session_id in active_agents:
-        agent = active_agents[session_id]
+    agent = await agent_manager.get(session_id)
+    if agent:
         # Merge additional data into memory
         if request.additionalData:
             agent.memory.update_user_profile(request.additionalData)
     else:
         # Load existing session to get goal and current URL
-        db_path = Path(cli_args.database_path) if cli_args.database_path else None
+        app_config: AppConfig = raw_request.app.state.app_config
+        db_path = Path(app_config.database_path) if app_config.database_path else None
         memory = SessionMemory(session_id, db_path=db_path)
 
         if not memory.goal:
@@ -251,7 +290,7 @@ async def continue_session(session_id: str, request: ContinueSessionRequest):
                 success=False,
                 goalAchieved=False,
                 sessionId=session_id,
-                status="failed",
+                status=GoalStatus.FAILED,
                 finalUrl="",
                 stepsTaken=0,
                 executionTime=0,
@@ -265,8 +304,8 @@ async def continue_session(session_id: str, request: ContinueSessionRequest):
         agent = AutonomousWebAgent(
             session_id=session_id,
             db_path=db_path,
-            callback_url=cli_args.callback_url,
-            port=cli_args.port,
+            callback_url=app_config.callback_url,
+            port=app_config.port,
             task_id=session_id
         )
 
@@ -284,57 +323,11 @@ async def continue_session(session_id: str, request: ContinueSessionRequest):
 
     # Keep agent alive if still awaiting, otherwise clean up
     if result.get("awaitingUserAction") or result.get("needsInput"):
-        active_agents[session_id] = agent
-    elif session_id in active_agents:
-        del active_agents[session_id]
+        await agent_manager.set(session_id, agent)
+    else:
+        await agent_manager.remove(session_id)
 
-    # Convert action history
-    action_history = []
-    for action in result.get("actionHistory", []):
-        action_history.append(ActionHistoryItem(
-            step=action.get("step", 0),
-            action=action.get("action", "unknown"),
-            params=action.get("params", {}),
-            success=action.get("success", False),
-            result=action.get("result", {}),
-            timestamp=action.get("timestamp", "")
-        ))
-
-    # Convert errors
-    errors = []
-    for error in result.get("errors", []):
-        errors.append(ErrorDetail(
-            type=error.get("type", "unknown"),
-            message=error.get("message", ""),
-            field=error.get("field"),
-            details=error.get("details")
-        ))
-
-    # Build memory summary
-    memory_data = result.get("memory", {})
-    memory_summary = MemorySummary(
-        enteredData=memory_data.get("enteredData", {}),
-        visitedUrls=memory_data.get("visitedUrls", []),
-        extractedInfo=memory_data.get("extractedInfo", {})
-    )
-
-    return ExecuteGoalResponse(
-        success=result["success"],
-        goalAchieved=result["goalAchieved"],
-        sessionId=result["sessionId"],
-        status=result.get("status", "unknown"),
-        finalUrl=result.get("finalUrl", ""),
-        stepsTaken=result.get("stepsTaken", 0),
-        executionTime=result.get("executionTime", 0),
-        tokensUsed=result.get("tokensUsed", 0),
-        actionHistory=action_history,
-        memory=memory_summary,
-        errors=errors,
-        needsInput=result.get("needsInput"),
-        missingFields=result.get("missingFields"),
-        awaitingUserAction=result.get("awaitingUserAction"),
-        message=result.get("message")
-    )
+    return _build_response(result)
 
 
 @app.get("/health")
@@ -384,25 +377,30 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    # Parse CLI arguments
+    # Validate config at startup
+    config.validate()
+
+    # Parse CLI arguments and store on app.state
     args = parse_args()
-    cli_args.port = args.port
-    cli_args.callback_url = args.callback_url
-    cli_args.database_path = args.database_path
+    app.state.app_config = AppConfig(
+        port=args.port,
+        callback_url=args.callback_url,
+        database_path=args.database_path
+    )
 
     # Determine port (CLI arg takes precedence over config)
     port = args.port if args.port else config.PORT
 
-    print(f"Starting Autonomous Web Agent on port {port}")
-    print(f"Debug mode: {config.DEBUG}")
-    print(f"Headless browser: {config.HEADLESS}")
-    print(f"OpenAI model: {config.OPENAI_MODEL}")
+    logger.info(f"Starting Autonomous Web Agent on port {port}")
+    logger.info(f"Debug mode: {config.DEBUG}")
+    logger.info(f"Headless browser: {config.HEADLESS}")
+    logger.info(f"OpenAI model: {config.OPENAI_MODEL}")
     if args.callback_url:
-        print(f"Callback URL: {args.callback_url}")
+        logger.info(f"Callback URL: {args.callback_url}")
     if args.database_path:
-        print(f"Database path: {args.database_path}")
-    print(f"\nAPI Documentation: http://localhost:{port}/docs")
-    print(f"Health Check: http://localhost:{port}/health\n")
+        logger.info(f"Database path: {args.database_path}")
+    logger.info(f"API Documentation: http://localhost:{port}/docs")
+    logger.info(f"Health Check: http://localhost:{port}/health")
 
     uvicorn.run(
         app,

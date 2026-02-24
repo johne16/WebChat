@@ -11,12 +11,13 @@ An autonomous web agent that uses GPT-5 to execute natural language goals on web
 - **User Action Support**: Agent pauses for captchas, selections, or verifications via `awaiting_user_action` status
 - **Multi-Action Support**: fill_form, click_link, click_button, go_back, scroll, wait, read_content
 - **Code Validation**: Security-focused validation prevents dangerous operations
+- **Performance Metrics**: JSONL metrics logging for per-session performance analysis
 - **REST API**: FastAPI server for easy integration as an LLM tool
 - **Docker Support**: Runs as standalone container for use by other LLMs
 
 ## Architecture
 
-**7-Module Design:**
+**9-Module Design:**
 - `web_agent.py` - Main orchestrator running the autonomous loop
 - `action_executor.py` - Executes actions decided by planner
 - `memory.py` - SQLite-backed session memory
@@ -24,6 +25,8 @@ An autonomous web agent that uses GPT-5 to execute natural language goals on web
 - `browser.py` - Playwright wrapper + HTML preprocessing
 - `execution_engine.py` - JS validation + execution
 - `agent_service.py` - FastAPI server (v2.0.0)
+- `config.py` - Centralized configuration and GoalStatus enum
+- `metrics.py` - JSONL performance metrics logger
 
 ## Installation
 
@@ -218,7 +221,7 @@ The agent is designed to work with the Flask test forms at `C:\Users\John\Pychar
 
 ## Configuration
 
-All configuration is managed via `.env` file:
+All configuration is managed via `.env` file and `src/config.py`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -243,13 +246,15 @@ web_agent/
 │   ├── llm.py                # OpenAI GPT-5 client
 │   ├── browser.py            # Playwright wrapper + HTML preprocessing
 │   ├── execution_engine.py   # JS validation + execution
-│   └── agent_service.py      # FastAPI server
+│   ├── agent_service.py      # FastAPI server
+│   ├── config.py             # Configuration and GoalStatus enum
+│   └── metrics.py            # JSONL performance metrics logger
 ├── prompts/
 │   └── planning_prompt.txt   # LLM planning prompt
 ├── data/
 │   └── sessions.db           # SQLite session storage
 ├── tests/                    # Unit and integration tests
-├── logs/                     # Generated code and logs
+├── logs/                     # Generated code and JSONL metrics ({sessionId}.jsonl)
 ├── Dockerfile                # Container build
 ├── requirements.txt          # Python dependencies
 ├── .env                      # Environment variables
