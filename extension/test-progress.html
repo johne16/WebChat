@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<title>Progress Indicator Test</title>
+	<link rel="stylesheet" href="panel.css">
+	<style>
+		body {
+			display: flex;
+			flex-direction: column;
+			height: 100vh;
+			overflow: hidden;
+			max-width: 400px;
+			margin: 0 auto;
+		}
+		.log {
+			flex: 1;
+			min-height: 0;
+			overflow-y: auto;
+		}
+		.test-controls {
+			padding: 16px;
+			display: flex;
+			flex-direction: column;
+			gap: 10px;
+		}
+		.test-controls button {
+			all: unset;
+			background: var(--acc);
+			color: #fff;
+			padding: 10px 16px;
+			border-radius: 8px;
+			cursor: pointer;
+			font-weight: 600;
+			font-size: 13px;
+			text-align: center;
+		}
+		.test-controls button:disabled {
+			opacity: 0.4;
+			cursor: not-allowed;
+		}
+		.test-controls button:hover:not(:disabled) {
+			opacity: 0.9;
+		}
+		.test-label {
+			font-size: 11px;
+			color: var(--mut);
+			margin-top: 8px;
+		}
+	</style>
+</head>
+<body>
+	<!-- Replicated header from panel.html -->
+	<header class="hdr"><strong>WebChat</strong>
+		<span id="header-progress" class="header-progress" hidden></span>
+		<div class="hdr-buttons">
+			<button id="stop-agent-btn" type="button" aria-label="Stop agent" title="Stop agent" class="icon-btn stop-btn" hidden>
+				<svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true">
+					<rect x="6" y="6" width="12" height="12" rx="2"/>
+				</svg>
+			</button>
+			<button id="close" type="button" aria-label="Close" title="Close">X</button>
+		</div>
+	</header>
+
+	<main id="log" class="log" aria-live="polite">
+		<div class="meta">Progress indicator test page — no LLM calls needed</div>
+	</main>
+
+	<div class="test-controls">
+		<div class="test-label">Simulations (each runs with ~1.5s delays between steps)</div>
+		<button id="sim-agent" type="button">Simulate Agent Run</button>
+		<button id="sim-research" type="button">Simulate Research</button>
+		<button id="sim-needs-input" type="button">Simulate Needs Input</button>
+		<button id="sim-stop" type="button">Simulate Stop</button>
+	</div>
+
+	<script>
+		// Inline updateHeaderProgress (same logic as ui.js, standalone for test page)
+		const headerProgress = document.getElementById('header-progress');
+		const stopBtn = document.getElementById('stop-agent-btn');
+
+		function updateHeaderProgress(text) {
+			if (!headerProgress) return;
+			if (text) {
+				headerProgress.textContent = text;
+				headerProgress.hidden = false;
+				headerProgress.offsetWidth; // reflow
+				headerProgress.classList.add('visible');
+			} else {
+				headerProgress.classList.remove('visible');
+				setTimeout(() => {
+					headerProgress.hidden = true;
+					headerProgress.textContent = '';
+				}, 300);
+			}
+		}
+
+		function showStop() { stopBtn.hidden = false; }
+		function hideStop() { stopBtn.hidden = true; }
+
+		function disableAll() {
+			document.querySelectorAll('.test-controls button').forEach(b => b.disabled = true);
+		}
+		function enableAll() {
+			document.querySelectorAll('.test-controls button').forEach(b => b.disabled = false);
+		}
+
+		function delay(ms) {
+			return new Promise(r => setTimeout(r, ms));
+		}
+
+		// Simulate Agent Run: Starting → step 1 → step 2 → step 3 → achieved (clears)
+		document.getElementById('sim-agent').addEventListener('click', async () => {
+			disableAll();
+			showStop();
+
+			updateHeaderProgress('Agent 1: Starting...');
+			await delay(1500);
+
+			updateHeaderProgress('Agent 1: fill_form... (1/20)');
+			await delay(1500);
+
+			updateHeaderProgress('Agent 1: click_button... (2/20)');
+			await delay(1500);
+
+			updateHeaderProgress('Agent 1: click_link... (3/20)');
+			await delay(1500);
+
+			// Achieved — clear
+			updateHeaderProgress('');
+			hideStop();
+			enableAll();
+		});
+
+		// Simulate Research: Researching → Searching → Fetching → clears
+		document.getElementById('sim-research').addEventListener('click', async () => {
+			disableAll();
+
+			updateHeaderProgress('Researching...');
+			await delay(1500);
+
+			updateHeaderProgress('Searching: "climate change effects 2026"');
+			await delay(1500);
+
+			updateHeaderProgress('Fetching: https://example.com/article');
+			await delay(1500);
+
+			updateHeaderProgress('Formulating answer...');
+			await delay(1500);
+
+			updateHeaderProgress('');
+			enableAll();
+		});
+
+		// Simulate Needs Input: progress → needs input (clears) → continuing → clears
+		document.getElementById('sim-needs-input').addEventListener('click', async () => {
+			disableAll();
+			showStop();
+
+			updateHeaderProgress('Agent 1: Starting...');
+			await delay(1500);
+
+			updateHeaderProgress('Agent 1: fill_form... (1/20)');
+			await delay(1500);
+
+			// Needs input — clear progress
+			updateHeaderProgress('');
+			await delay(2000);
+
+			// User provides input — resume
+			updateHeaderProgress('Agent 1: Continuing...');
+			await delay(1500);
+
+			updateHeaderProgress('Agent 1: click_button... (2/20)');
+			await delay(1500);
+
+			updateHeaderProgress('');
+			hideStop();
+			enableAll();
+		});
+
+		// Simulate Stop: progress → stopped (clears)
+		document.getElementById('sim-stop').addEventListener('click', async () => {
+			disableAll();
+			showStop();
+
+			updateHeaderProgress('Agent 1: Starting...');
+			await delay(1500);
+
+			updateHeaderProgress('Agent 1: fill_form... (1/20)');
+			await delay(1500);
+
+			// Stop
+			updateHeaderProgress('');
+			hideStop();
+			enableAll();
+		});
+	</script>
+</body>
+</html>

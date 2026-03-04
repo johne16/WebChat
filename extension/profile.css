@@ -1,0 +1,395 @@
+/* profile.css — user profile management page */
+:root {
+	--fg: #111;
+	--bg: #fff;
+	--muted: #666;
+	--accent: #10b981;
+	--border: #e5e7eb;
+	--chip: #f3f4f6;
+	--error: #ef4444;
+	--success: #10b981;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--fg: #e6e6e6;
+		--bg: #0f1115;
+		--muted: #9aa;
+		--accent: #10b981;
+		--border: #2b2f3a;
+		--chip: #1b1f2a;
+		--error: #f87171;
+		--success: #34d399;
+	}
+}
+
+* {
+	box-sizing: border-box
+}
+
+body {
+	margin: 0;
+	color: var(--fg);
+	background: var(--bg);
+	font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Arial
+}
+
+header {
+	padding: 16px 20px;
+	border-bottom: 1px solid var(--border);
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+h1 {
+	margin: 0;
+	font-size: 18px
+}
+
+.status {
+	font-size: 12px;
+	padding: 4px 8px;
+	border-radius: 4px;
+	background: var(--chip);
+}
+
+.status.locked {
+	color: var(--error);
+}
+
+.status.unlocked {
+	color: var(--success);
+}
+
+main {
+	padding: 20px;
+	display: grid;
+	gap: 20px;
+	max-width: 600px
+}
+
+section {
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	padding: 16px;
+	background: var(--bg)
+}
+
+h2 {
+	margin: 0 0 12px;
+	font-size: 15px
+}
+
+.help {
+	color: var(--muted);
+	font-size: 12px;
+	margin: 8px 2px 0
+}
+
+/* Unlock form */
+.unlock-form {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.unlock-form input {
+	flex: 1;
+	min-width: 200px;
+	padding: 10px 12px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--chip);
+	color: var(--fg);
+	font-size: 14px;
+}
+
+.unlock-form input:focus {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
+.unlock-form button {
+	padding: 10px 20px;
+	border: none;
+	border-radius: 8px;
+	background: var(--accent);
+	color: #fff;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.unlock-form button:hover {
+	opacity: 0.9;
+}
+
+/* Create form */
+.create-form {
+	display: grid;
+	gap: 12px;
+}
+
+.create-form .form-row input {
+	padding: 10px 12px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--chip);
+	color: var(--fg);
+	font-size: 14px;
+}
+
+.create-form .form-row input:focus {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
+/* Profile form */
+.profile-form {
+	display: grid;
+	gap: 16px;
+}
+
+.form-row {
+	display: grid;
+	gap: 4px;
+}
+
+.form-row label {
+	font-size: 13px;
+	font-weight: 500;
+}
+
+.form-row input {
+	padding: 10px 12px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--chip);
+	color: var(--fg);
+	font-size: 14px;
+}
+
+.form-row input:focus {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
+.form-row input:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.form-grid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 12px;
+}
+
+@media (max-width: 480px) {
+	.form-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
+/* Buttons */
+.btn-row {
+	display: flex;
+	gap: 8px;
+	margin-top: 8px;
+}
+
+.btn-primary {
+	padding: 10px 20px;
+	border: none;
+	border-radius: 8px;
+	background: var(--accent);
+	color: #fff;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.btn-primary:hover {
+	opacity: 0.9;
+}
+
+.btn-primary:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.btn-secondary {
+	padding: 10px 20px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--chip);
+	color: var(--fg);
+	font-weight: 500;
+	cursor: pointer;
+}
+
+.btn-secondary:hover {
+	background: var(--border);
+}
+
+.btn-danger {
+	padding: 10px 20px;
+	border: 1px solid var(--error);
+	border-radius: 8px;
+	background: transparent;
+	color: var(--error);
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.btn-danger:hover {
+	background: var(--error);
+	color: #fff;
+}
+
+.danger-heading {
+	color: var(--error);
+}
+
+/* Messages */
+.message {
+	padding: 10px 12px;
+	border-radius: 8px;
+	font-size: 13px;
+	margin-bottom: 12px;
+}
+
+.message.error {
+	background: rgba(239, 68, 68, 0.1);
+	color: var(--error);
+	border: 1px solid var(--error);
+}
+
+.message.success {
+	background: rgba(16, 185, 129, 0.1);
+	color: var(--success);
+	border: 1px solid var(--success);
+}
+
+.message.hidden {
+	display: none;
+}
+
+/* New profile section */
+.new-profile-notice {
+	color: var(--muted);
+	font-size: 13px;
+	margin-bottom: 12px;
+}
+
+/* Site data section */
+.empty-state {
+	color: var(--muted);
+	font-size: 13px;
+	font-style: italic;
+}
+
+.site-item {
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	margin-bottom: 8px;
+	overflow: hidden;
+}
+
+.site-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 10px 12px;
+	background: var(--chip);
+	cursor: pointer;
+	user-select: none;
+}
+
+.site-header:hover {
+	background: var(--border);
+}
+
+.site-name {
+	font-weight: 500;
+	font-size: 13px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.site-name .chevron {
+	transition: transform 0.2s;
+	font-size: 10px;
+	color: var(--muted);
+}
+
+.site-item.expanded .site-name .chevron {
+	transform: rotate(90deg);
+}
+
+.site-actions {
+	display: flex;
+	gap: 4px;
+}
+
+.btn-icon {
+	padding: 4px 8px;
+	border: none;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--muted);
+	cursor: pointer;
+	font-size: 12px;
+}
+
+.btn-icon:hover {
+	background: var(--border);
+	color: var(--fg);
+}
+
+.btn-icon.delete:hover {
+	background: rgba(239, 68, 68, 0.1);
+	color: var(--error);
+}
+
+.site-fields {
+	display: none;
+	padding: 12px;
+	border-top: 1px solid var(--border);
+}
+
+.site-item.expanded .site-fields {
+	display: block;
+}
+
+.field-item {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 6px 0;
+	border-bottom: 1px solid var(--border);
+}
+
+.field-item:last-child {
+	border-bottom: none;
+}
+
+.field-info {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.field-name {
+	font-size: 12px;
+	color: var(--muted);
+}
+
+.field-value {
+	font-size: 13px;
+	font-family: monospace;
+}
+
+.field-value.masked {
+	color: var(--muted);
+}

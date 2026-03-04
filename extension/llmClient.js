@@ -1,54 +1,123 @@
 // extension/llmClient.js
 
+import { SERVER_BASE, getConfig } from './config.js';
+import { crawlPage, parseJsonFromLLM } from './utils.js';
+
+// Cache modelType and provider at module level (item 4)
+// Hardcoded defaults used until storage read completes
+let cachedModel = 'gpt-5.2';
+let cachedProvider = 'openai';
+
+// Initialize from storage
+chrome.storage.local.get(['modelType', 'provider']).then(({ modelType, provider }) => {
+	if (modelType) cachedModel = modelType;
+	if (provider) cachedProvider = provider;
+});
+
+// Keep in sync with storage changes
+chrome.storage.onChanged.addListener((changes, area) => {
+	if (area === 'local') {
+		if ('modelType' in changes) {
+			cachedModel = changes.modelType.newValue || getConfig()?.providers?.defaultModel || 'gpt-5.2';
+		}
+		if ('provider' in changes) {
+			cachedProvider = changes.provider.newValue || getConfig()?.providers?.default || 'openai';
+		}
+	}
+});
+
+/**
+ * Internal helper: call the LLM via server proxy and return parsed response
+ * @param {string} model - Model name
+ * @param {Array} messages - Chat messages array
+ * @param {string} errorLabel - Label for error messages
+ * @param {Object} [options] - Optional parameters
+ * @param {number} [options.userId=1] - User ID for conversation history
+ * @param {boolean} [options.storeInHistory=false] - Whether to store this exchange in history
+ * @param {string} [options.provider] - LLM provider ('openai' or 'anthropic')
+ * @returns {Promise<Object>} Parsed response data
+ */
+async function callLLM(model, messages, errorLabel = 'LLM', { userId = 1, storeInHistory = false, provider, flow } = {}) {
+	const res = await fetch(`${SERVER_BASE}/api/openai/chat`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ model, messages, userId, storeInHistory, provider: provider || cachedProvider, flow })
+	});
+
+	if (!res.ok) throw new Error(`${errorLabel} error ${res.status}`);
+
+	const data = await res.json();
+	return data;
+}
+
+// Helper: Build context prompt for LLM from accumulated observations
+function buildContextPrompt(context) {
+	let prompt = `User's question: ${context.query}\n`;
+	prompt += `Current page URL: ${context.currentURL}\n\n`;
+
+	if (context.observations.length === 0) {
+		prompt += `No observations yet. This is your first action.\n`;
+	} else {
+		prompt += `Previous observations:\n\n`;
+		context.observations.forEach((obs, index) => {
+			prompt += `Observation ${index + 1}:\n`;
+			prompt += `Type: ${obs.type}\n`;
+
+			if (obs.type === 'search_results') {
+				prompt += `Search query: "${obs.query}"\n`;
+				prompt += `Found ${obs.count} results:\n`;
+				obs.results.forEach((result, i) => {
+					prompt += `  ${i + 1}. ${result.title}\n`;
+					prompt += `     URL: ${result.url}\n`;
+					prompt += `     ${result.description}\n\n`;
+				});
+			} else if (obs.type === 'crawled_content') {
+				prompt += `Source: ${obs.source}\n`;
+				if (obs.warning) {
+					prompt += `Warning: ${obs.warning}\n`;
+				}
+				prompt += `Content:\n${obs.content}\n`;
+			} else if (obs.type === 'duplicate_fetch') {
+				prompt += `${obs.content}\n`;
+			} else if (obs.type === 'error') {
+				prompt += `Error: ${obs.content}\n`;
+			}
+
+			prompt += `\n---\n\n`;
+		});
+	}
+
+	prompt += `What should you do next?`;
+	return prompt;
+}
+
 export async function sendToBot(userText, currentURL) {
-    const { modelType } = await chrome.storage.local.get('modelType');
-    const model = modelType || 'gpt-4o-mini';
+	console.log('[llmClient] sendToBot called with:', { userText, currentURL });
 
-    // Scrape current page only
-    const crawlRes = await fetch('http://localhost:8787/api/crawl', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            urls: [currentURL],
-            crawler_config: {
-                exclude_external_links: true,
-                remove_overlay_elements: true,
-                word_count_threshold: 10
-            }
-        })
-    });
+	const model = cachedModel;
+	console.log('[llmClient] Using model:', model);
 
-    if (!crawlRes.ok) throw new Error(`Crawl error ${crawlRes.status}`);
-    
-    const crawlData = await crawlRes.json();
-    const pageContent = crawlData.results?.[0]?.markdown?.raw_markdown || '';
+	// Scrape current page via shared crawlPage
+	console.log('[llmClient] Starting crawl request...');
+	const pageContent = await crawlPage(currentURL);
+	console.log('[llmClient] Crawl successful, content length:', pageContent.length);
 
-    // Send to LLM with page content
-    const llmBody = {
-        model,
-        messages: [
-            { 
-                role: 'system', 
-                content: 'Answer the user\'s question based on the provided webpage content.'
-            },
-            { 
-                role: 'user', 
-                content: `Page URL: ${currentURL}\n\nPage content:\n${pageContent}\n\nUser question: ${userText}`
-            }
-        ]
-    };
+	// Send to LLM with page content
+	console.log('[llmClient] Sending to LLM API...');
+	const data = await callLLM(model, [
+		{
+			role: 'system',
+			content: 'Answer the user\'s question based on the provided webpage content.'
+		},
+		{
+			role: 'user',
+			content: `Page URL: ${currentURL}\n\nPage content:\n${pageContent}\n\nUser question: ${userText}`
+		}
+	], 'LLM', { storeInHistory: true, flow: 'simple' });
 
-    const res = await fetch('http://localhost:8787/api/openai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(llmBody)
-    });
-
-    if (!res.ok) throw new Error(`LLM error ${res.status}`);
-
-    const data = await res.json();
-    const text = data?.choices?.[0]?.message?.content || '';
-    return { text, raw: data };
+	const text = data?.content || '';
+	console.log('[llmClient] LLM response received, text length:', text.length);
+	return { text };
 }
 
 /**
@@ -57,11 +126,10 @@ export async function sendToBot(userText, currentURL) {
  * @returns {Promise<Object>} - Decision object with thought, action, action_input
  */
 export async function askLLMToThink(context) {
-    const { modelType } = await chrome.storage.local.get('modelType');
-    const model = modelType || 'gpt-4o-mini';
+	const model = cachedModel;
 
-    // Build the thinking prompt
-    const systemPrompt = `You are a research assistant using ReAct. IMPORTANT: Keep all responses concise and focused.
+	// Build the thinking prompt
+	const systemPrompt = `You are a research assistant using ReAct. IMPORTANT: Keep all responses concise and focused.
 
 **Output constraints (CRITICAL):**
 - "thought" field: 1-2 sentences maximum
@@ -87,47 +155,34 @@ Respond ONLY with valid JSON in this exact format (no markdown, no extra text):
   "action_input": "search query, URL, or your final answer"
 }`;
 
-    const userPrompt = buildContextPrompt(context);
+	const userPrompt = buildContextPrompt(context);
 
-    const body = {
-        model,
-        messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-        ]
-    };
+	const data = await callLLM(model, [
+		{ role: 'system', content: systemPrompt },
+		{ role: 'user', content: userPrompt }
+	], 'LLM Think', { flow: 'research' });
 
-    const res = await fetch('http://localhost:8787/api/openai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-    });
+	const responseText = data?.content || '';
 
-    if (!res.ok) throw new Error(`LLM Think error ${res.status}`);
+	// Parse the JSON response using shared utility
+	try {
+		const decision = parseJsonFromLLM(responseText);
 
-    const data = await res.json();
-    const responseText = data?.choices?.[0]?.message?.content || '';
+		// Validate decision structure
+		if (!decision.thought || !decision.action) {
+			throw new Error('Invalid decision structure');
+		}
 
-    // Parse the JSON response
-    try {
-        const cleanedText = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        const decision = JSON.parse(cleanedText);
-        
-        // Validate decision structure
-        if (!decision.thought || !decision.action) {
-            throw new Error('Invalid decision structure');
-        }
-
-        return decision;
-    } catch (error) {
-        console.error('[LLM Think] Failed to parse decision:', responseText);
-        // Fallback: try to answer with what we have
-        return {
-            thought: 'Failed to parse decision, attempting to answer',
-            action: 'answer',
-            action_input: 'I encountered an error processing your request. Please try rephrasing your question.'
-        };
-    }
+		return decision;
+	} catch (error) {
+		console.error('[LLM Think] Failed to parse decision:', responseText);
+		// Fallback: try to answer with what we have
+		return {
+			thought: 'Failed to parse decision, attempting to answer',
+			action: 'answer',
+			action_input: 'I encountered an error processing your request. Please try rephrasing your question.'
+		};
+	}
 }
 
 /**
@@ -137,75 +192,33 @@ Respond ONLY with valid JSON in this exact format (no markdown, no extra text):
  * @returns {Promise<string>} - Final answer
  */
 export async function askLLMToAnswer(context) {
-    const { modelType } = await chrome.storage.local.get('modelType');
-    const model = modelType || 'gpt-4o-mini';
+	const model = cachedModel;
 
-    const systemPrompt = `Based on the search results and web pages examined, provide the best possible answer to the user's question. 
+	const systemPrompt = `Based on the search results and web pages examined, provide the best possible answer to the user's question.
 
 If you found sufficient information, provide a complete answer.
 If you could not find enough information, clearly state what you searched for and what you could not find.
 Be honest about limitations.`;
 
-    const userPrompt = buildContextPrompt(context);
+	const userPrompt = buildContextPrompt(context);
 
-    const body = {
-        model,
-        messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-        ]
-    };
+	const data = await callLLM(model, [
+		{ role: 'system', content: systemPrompt },
+		{ role: 'user', content: userPrompt }
+	], 'LLM Answer', { flow: 'research' });
 
-    const res = await fetch('http://localhost:8787/api/openai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-    });
-
-    if (!res.ok) throw new Error(`LLM Answer error ${res.status}`);
-
-    const data = await res.json();
-    return data?.choices?.[0]?.message?.content || 'I was unable to generate an answer.';
+	return data?.content || 'I was unable to generate an answer.';
 }
 
-// Helper: Build context prompt for LLM from accumulated observations
-function buildContextPrompt(context) {
-    let prompt = `User's question: ${context.query}\n`;
-    prompt += `Current page URL: ${context.currentURL}\n\n`;
-
-    if (context.observations.length === 0) {
-        prompt += `No observations yet. This is your first action.\n`;
-    } else {
-        prompt += `Previous observations:\n\n`;
-        context.observations.forEach((obs, index) => {
-            prompt += `Observation ${index + 1}:\n`;
-            prompt += `Type: ${obs.type}\n`;
-
-            if (obs.type === 'search_results') {
-                prompt += `Search query: "${obs.query}"\n`;
-                prompt += `Found ${obs.count} results:\n`;
-                obs.results.forEach((result, i) => {
-                    prompt += `  ${i + 1}. ${result.title}\n`;
-                    prompt += `     URL: ${result.url}\n`;
-                    prompt += `     ${result.description}\n\n`;
-                });
-            } else if (obs.type === 'crawled_content') {
-                prompt += `Source: ${obs.source}\n`;
-                if (obs.warning) {
-                    prompt += `Warning: ${obs.warning}\n`;
-                }
-                prompt += `Content:\n${obs.content}\n`;
-            } else if (obs.type === 'duplicate_fetch') {
-                prompt += `${obs.content}\n`;
-            } else if (obs.type === 'error') {
-                prompt += `Error: ${obs.content}\n`;
-            }
-
-            prompt += `\n---\n\n`;
-        });
-    }
-
-    prompt += `What should you do next?`;
-    return prompt;
+/**
+ * Call the LLM for intent detection or other one-off requests
+ * @param {string} model - Model name
+ * @param {Array} messages - Chat messages array
+ * @param {Object} [options] - Optional parameters
+ * @param {string} [options.provider] - Force a specific provider (e.g. 'openai' for intent detection)
+ * @returns {Promise<string>} Raw response content text
+ */
+export async function callLLMForContent(model, messages, { provider } = {}) {
+	const data = await callLLM(model, messages, 'LLM', { provider, flow: 'intent' });
+	return data?.content || '';
 }
-

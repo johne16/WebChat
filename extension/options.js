@@ -1,85 +1,79 @@
 // extension/options.js
-// ============================================================================
-// TODO_CLEANUP: Added ReAct mode toggle handling
-// ============================================================================
-let {isTestingMode, modelType, useReActMode} = await chrome.storage.local.get(['isTestingMode', 'modelType', 'useReActMode']);
 
-// Default to true if not set
-if (useReActMode === undefined) {
-	useReActMode = true;
-	chrome.storage.local.set({useReActMode});
-}
+try {
+	let { isTestingMode, provider, modelType, agentProvider, agentModelType } = await chrome.storage.local.get([
+		'isTestingMode', 'provider', 'modelType', 'agentProvider', 'agentModelType'
+	]);
 
-const switchBtn = document.getElementById('modeSwitch');
-const aiLabel = document.getElementById('ai-mode');
-const testingLabel = document.getElementById('testing-mode');
-const modelForm = document.getElementById('modelForm');
+	const switchBtn = document.getElementById('modeSwitch');
+	const aiLabel = document.getElementById('ai-mode');
+	const testingLabel = document.getElementById('testing-mode');
+	const modelForm = document.getElementById('modelForm');
+	const agentModelForm = document.getElementById('agentModelForm');
 
-// ============================================================================
-// TODO_CLEANUP: ReAct switch element
-// ============================================================================
-const reactSwitch = document.getElementById('reactSwitch');
-const simpleModeLabel = document.getElementById('simple-mode');
-const reactModeLabel = document.getElementById('research-mode-label');
-
-function setMode(v) {
-	isTestingMode = v;
-	chrome.storage.local.set({isTestingMode});
-	switchBtn.setAttribute('aria-checked', v ? 'true' : 'false');
-	switchBtn.classList.toggle('on', v);
-	aiLabel.classList.toggle('active', !v);
-	testingLabel.classList.toggle('active', v);
-	switchBtn.setAttribute('aria-label', v ? 'Testing Mode' : 'AI Mode');
-	document.documentElement.dataset.mode = v ? 'testing' : 'ai';
-}
-
-// ============================================================================
-// TODO_CLEANUP: ReAct mode toggle function
-// ============================================================================
-function setReActMode(v) {
-	useReActMode = v;
-	chrome.storage.local.set({useReActMode});
-	reactSwitch.setAttribute('aria-checked', v ? 'true' : 'false');
-	reactSwitch.classList.toggle('on', v);
-	simpleModeLabel.classList.toggle('active', !v);
-	reactModeLabel.classList.toggle('active', v);
-	reactSwitch.setAttribute('aria-label', v ? 'ReAct Mode' : 'Simple Mode');
-}
-
-setMode(isTestingMode);
-setReActMode(useReActMode);
-
-switchBtn.addEventListener('click', () => {
-	setMode(switchBtn.getAttribute('aria-checked') !== 'true');
-});
-
-switchBtn.addEventListener('keydown', (e) => {
-	if (e.key === ' ' || e.key === 'Enter') {
-		e.preventDefault();
-		switchBtn.click();
+	function setMode(v) {
+		isTestingMode = v;
+		chrome.storage.local.set({ isTestingMode });
+		switchBtn.setAttribute('aria-checked', v ? 'true' : 'false');
+		switchBtn.classList.toggle('on', v);
+		aiLabel.classList.toggle('active', !v);
+		testingLabel.classList.toggle('active', v);
+		switchBtn.setAttribute('aria-label', v ? 'Testing Mode' : 'AI Mode');
+		document.documentElement.dataset.mode = v ? 'testing' : 'ai';
 	}
-	if (e.key === 'ArrowRight') setMode(true);
-	if (e.key === 'ArrowLeft') setMode(false);
-});
 
-// ============================================================================
-// TODO_CLEANUP: ReAct switch event listeners
-// ============================================================================
-reactSwitch.addEventListener('click', () => {
-	setReActMode(reactSwitch.getAttribute('aria-checked') !== 'true');
-});
+	setMode(isTestingMode);
 
-reactSwitch.addEventListener('keydown', (e) => {
-	if (e.key === ' ' || e.key === 'Enter') {
-		e.preventDefault();
-		reactSwitch.click();
+	// Pre-select the stored provider:model radio button on page load
+	if (provider && modelType) {
+		const composite = `${provider}:${modelType}`;
+		const radio = modelForm.querySelector(`input[value="${composite}"]`);
+		if (radio) radio.checked = true;
+	} else if (modelType) {
+		// Legacy: modelType without provider
+		const radio = modelForm.querySelector(`input[value="openai:${modelType}"]`);
+		if (radio) radio.checked = true;
 	}
-	if (e.key === 'ArrowRight') setReActMode(true);
-	if (e.key === 'ArrowLeft') setReActMode(false);
-});
 
-modelForm.addEventListener('change', (e) => {
-	modelType = e.target.value;
-	chrome.storage.local.set({modelType});
-});
+	// Pre-select the stored agent provider:model radio
+	if (agentProvider && agentModelType) {
+		const composite = `${agentProvider}:${agentModelType}`;
+		const radio = agentModelForm.querySelector(`input[value="${composite}"]`);
+		if (radio) radio.checked = true;
+	} else if (agentModelType) {
+		const radio = agentModelForm.querySelector(`input[value="openai:${agentModelType}"]`);
+		if (radio) radio.checked = true;
+	}
 
+	switchBtn.addEventListener('click', () => {
+		setMode(switchBtn.getAttribute('aria-checked') !== 'true');
+	});
+
+	switchBtn.addEventListener('keydown', (e) => {
+		if (e.key === ' ' || e.key === 'Enter') {
+			e.preventDefault();
+			switchBtn.click();
+		}
+		if (e.key === 'ArrowRight') setMode(true);
+		if (e.key === 'ArrowLeft') setMode(false);
+	});
+
+	modelForm.addEventListener('change', (e) => {
+		// Value format: "provider:model"
+		const [newProvider, ...rest] = e.target.value.split(':');
+		const newModel = rest.join(':');
+		provider = newProvider;
+		modelType = newModel;
+		chrome.storage.local.set({ provider, modelType });
+	});
+
+	agentModelForm.addEventListener('change', (e) => {
+		const [newProvider, ...rest] = e.target.value.split(':');
+		const newModel = rest.join(':');
+		agentProvider = newProvider;
+		agentModelType = newModel;
+		chrome.storage.local.set({ agentProvider, agentModelType });
+	});
+} catch (error) {
+	console.error('[Options] Initialization error:', error);
+}

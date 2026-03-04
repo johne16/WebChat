@@ -29,33 +29,62 @@
 		</div>
 	</section>
 
-	<!-- LLM Models -->
-	<section aria-labelledby="llm-models">
-		<h2 id="llm-models">LLM Models</h2>
-		<form id="modelForm" class="models" role="radiogroup" aria-labelledby="llm-models">
-			<label class="model"><input type="radio" name="model" value="gpt-5-nano" checked/><span>gpt-5-nano</span></label>
-			<label class="model"><input type="radio" name="model" value="gpt-5-mini"/><span>gpt-5-mini</span></label>
-			<label class="model"><input type="radio" name="model" value="gpt-5"/><span>gpt-5</span></label>
+	<!-- Chat Model -->
+	<section aria-labelledby="chat-model">
+		<h2 id="chat-model">Chat Model</h2>
+		<form id="modelForm" role="radiogroup" aria-labelledby="chat-model">
+			<div class="model-grid">
+				<div class="model-grid-header"></div>
+				<div class="model-grid-header">OpenAI</div>
+				<div class="model-grid-header">Anthropic</div>
+
+				<div class="model-grid-row-label">Small</div>
+				<label class="model"><input type="radio" name="model" value="openai:gpt-5-nano"/><span>gpt-5-nano</span></label>
+				<label class="model"><input type="radio" name="model" value="anthropic:claude-haiku-4-5"/><span>claude-haiku-4-5</span></label>
+
+				<div class="model-grid-row-label">Mid</div>
+				<label class="model"><input type="radio" name="model" value="openai:gpt-5-mini"/><span>gpt-5-mini</span></label>
+				<label class="model"><input type="radio" name="model" value="anthropic:claude-sonnet-4-6"/><span>claude-sonnet-4-6</span></label>
+
+				<div class="model-grid-row-label">Large</div>
+				<label class="model"><input type="radio" name="model" value="openai:gpt-5.2" checked/><span>gpt-5.2</span></label>
+				<label class="model"><input type="radio" name="model" value="anthropic:claude-opus-4-6"/><span>claude-opus-4-6</span></label>
+			</div>
 		</form>
 	</section>
-	<!-- Research mode -->
-	<section aria-labelledby="research-mode">
-		<h2 id="research-mode">Research Mode</h2>
-		<div class="switch-row">
-			<span id="simple-mode" class="mode-label">Simple Mode</span>
 
-			<button id="reactSwitch" class="switch" role="switch" aria-checked="true"
-					aria-labelledby="simple-mode research-mode-label">
-				<span class="track" aria-hidden="true"></span>
-				<span class="thumb" aria-hidden="true"></span>
-			</button>
+	<!-- Agent Model -->
+	<section aria-labelledby="agent-model">
+		<h2 id="agent-model">Agent Model</h2>
+		<form id="agentModelForm" role="radiogroup" aria-labelledby="agent-model">
+			<div class="model-grid">
+				<div class="model-grid-header"></div>
+				<div class="model-grid-header">OpenAI</div>
+				<div class="model-grid-header">Anthropic</div>
 
-			<span id="research-mode-label" class="mode-label">Research Mode</span>
-		</div>
-		<p style="margin-top: 8px; font-size: 12px; color: #999;">
-			Research mode uses iterative web search and reasoning to answer complex questions.
-			Simple mode uses the current page only.
+				<div class="model-grid-row-label">Small</div>
+				<label class="model"><input type="radio" name="agentModel" value="openai:gpt-5-nano"/><span>gpt-5-nano</span></label>
+				<label class="model"><input type="radio" name="agentModel" value="anthropic:claude-haiku-4-5"/><span>claude-haiku-4-5</span></label>
+
+				<div class="model-grid-row-label">Mid</div>
+				<label class="model"><input type="radio" name="agentModel" value="openai:gpt-5-mini"/><span>gpt-5-mini</span></label>
+				<label class="model"><input type="radio" name="agentModel" value="anthropic:claude-sonnet-4-6"/><span>claude-sonnet-4-6</span></label>
+
+				<div class="model-grid-row-label">Large</div>
+				<label class="model"><input type="radio" name="agentModel" value="openai:gpt-5.2" checked/><span>gpt-5.2</span></label>
+				<label class="model"><input type="radio" name="agentModel" value="anthropic:claude-opus-4-6"/><span>claude-opus-4-6</span></label>
+			</div>
+		</form>
+	</section>
+	<!-- User Profile -->
+	<section aria-labelledby="user-profile">
+		<h2 id="user-profile">User Profile</h2>
+		<p style="margin: 0 0 12px; font-size: 13px; color: #999;">
+			Manage your encrypted profile for agent automation. The agent uses this data to fill out forms on your behalf.
 		</p>
+		<a href="profile.html" target="_blank" style="display: inline-block; padding: 8px 16px; background: #10b981; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 13px;">
+			Manage Profile
+		</a>
 	</section>
 </main>
 
