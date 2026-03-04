@@ -219,6 +219,7 @@ Profile data is encrypted with AES-256-GCM (PBKDF2, 100k iterations). Passphrase
 │   │   ├── proxy.js           # LLM, Crawl4AI, Brave Search proxy endpoints
 │   │   ├── agent.js           # Agent management endpoints
 │   │   └── database.js        # Database CRUD endpoints
+│   ├── metricsLogger.js        # JSONL metrics appender (chat/research turnaround times)
 │   ├── server.js              # Main Express app (imports route modules)
 │   └── sseManager.js          # SSE state management
 ├── web_agent/                 # Autonomous web agent (Python/FastAPI)
@@ -248,6 +249,8 @@ Profile data is encrypted with AES-256-GCM (PBKDF2, 100k iterations). Passphrase
 | `/api/agent/webhook` | POST | Receive agent status webhooks |
 | `/api/agent/needs-input` | GET | Get pending input requests |
 | `/api/agent/provide-input` | POST | Provide input for waiting agent |
+| `/api/metrics` | POST | Client-side metrics ingestion (JSONL) |
+| `/api/config` | GET | Expose provider and extension config |
 | `/api/events` | GET | SSE stream for real-time updates |
 
 ### Database Endpoints
