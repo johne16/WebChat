@@ -41,7 +41,7 @@ WebChat is a Chromium extension that adds an AI-powered side panel to help users
 
 ## Running the Extension
 
-The extension requires three services running. Start each in a separate terminal:
+The extension requires two services running. Start each in a separate terminal:
 
 ### Terminal 1: Crawl4AI
 
@@ -62,14 +62,7 @@ The server listens on port 8787 (configurable via `.env`). It handles:
 - LLM API proxying (OpenAI and Anthropic)
 - Brave Search proxying
 - Crawl4AI proxying
-- **Agent process spawning and management** (agents are now spawned on-demand, not manually)
-
-### Terminal 3: Web Agent (for Agent Mode)
-
-```bash
-cd web_agent
-python -m src.agent_service
-```
+- Agent process spawning and management (agents are spawned on-demand when needed)
 
 ## Installing the Extension
 
@@ -144,7 +137,7 @@ Select the provider and model via settings (⚙️). The settings page presents 
 |------|--------|-----------|
 | Small | gpt-5-nano | claude-haiku-4-5 |
 | Mid | gpt-5-mini | claude-sonnet-4-6 |
-| Large | gpt-5 | claude-opus-4-6 |
+| Large | gpt-5.2 | claude-opus-4-6 |
 
 ### User Profile
 Encrypted profile for agent automation. Manage via Settings → Manage Profile.

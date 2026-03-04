@@ -4,6 +4,7 @@
 import { startAgent, stopAgent, executeGoal, provideInput } from './agentClient.js';
 import { decryptProfile, encryptProfile } from './crypto.js';
 import { extractDomain } from './utils.js';
+import { getConfig } from './config.js';
 
 // Agent session state
 let agentSession = { sessionId: null, port: null, taskId: null };
@@ -90,7 +91,7 @@ export function transformProfileForAgent(profile) {
 			city: profile.city || '',
 			state: profile.state || '',
 			zip: profile.zip || '',
-			country: profile.country || 'United States'
+			country: profile.country || getConfig()?.extension?.profile?.defaultCountry || 'United States'
 		};
 	}
 
@@ -135,12 +136,20 @@ export async function executeAgentGoal(goal, startUrl, options = {}) {
 	currentAgentUrl = startUrl;
 	const agentProfile = transformProfileForAgent(decryptedProfile);
 
+	// Read agent-specific provider/model from storage
+	const { agentProvider, agentModelType } = await chrome.storage.local.get(['agentProvider', 'agentModelType']);
+	const cfg = getConfig()?.providers || {};
+
 	const result = await executeGoal(
 		agentSession.port,
 		goal,
 		startUrl,
 		agentProfile,
-		options
+		{
+			...options,
+			provider: agentProvider || cfg.defaultAgentProvider || 'openai',
+			model: agentModelType || cfg.defaultAgentModel || 'gpt-5.2'
+		}
 	);
 
 	agentSession.sessionId = result.sessionId;
@@ -160,10 +169,16 @@ export async function provideAgentInput(inputData) {
 	// Save to site data
 	await saveSiteData(inputData);
 
+	// Pass provider/model so resumed sessions use the same LLM
+	const { agentProvider, agentModelType } = await chrome.storage.local.get(['agentProvider', 'agentModelType']);
+	const cfg = getConfig()?.providers || {};
+
 	const result = await provideInput(
 		agentSession.port,
 		agentSession.sessionId,
-		inputData
+		inputData,
+		agentProvider || cfg.defaultAgentProvider || 'openai',
+		agentModelType || cfg.defaultAgentModel || 'gpt-5.2'
 	);
 
 	return result;

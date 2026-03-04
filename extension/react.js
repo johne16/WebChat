@@ -3,12 +3,18 @@
 import { askLLMToThink, askLLMToAnswer } from './llmClient.js';
 import { searchBrave } from './searchClient.js';
 import { crawlPage } from './utils.js';
+import { getConfig } from './config.js';
 
-// Named constants for bailout logic (item 19)
-const MAX_ITERATIONS = 5;
-const UNHELPFUL_THRESHOLD = 2;
-const MIN_ITERATIONS_BEFORE_BAILOUT = 2;
-const MIN_USEFUL_CONTENT_LENGTH = 100;
+// Bailout config read at call time (not module init) so loadConfig() has completed.
+function getReactConfig() {
+	const r = getConfig()?.extension?.react || {};
+	return {
+		maxIterations: r.maxIterations || 5,
+		unhelpfulThreshold: r.unhelpfulThreshold || 2,
+		minIterationsBeforeBailout: r.minIterationsBeforeBailout || 2,
+		minUsefulContentLength: r.minUsefulContentLength || 100
+	};
+}
 
 /**
  * Main ReAct orchestrator - runs Think->Act->Observe loop
@@ -18,6 +24,7 @@ const MIN_USEFUL_CONTENT_LENGTH = 100;
  * @returns {Promise<{answer: string}>} - Final answer and reasoning trace
  */
 export async function runReActLoop(userQuery, currentURL, onStep = null) {
+	const rc = getReactConfig();
 	const context = {
 		query: userQuery,
 		currentURL: currentURL,
@@ -36,8 +43,8 @@ export async function runReActLoop(userQuery, currentURL, onStep = null) {
 		}
 	}
 
-	for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-		console.log(`[ReAct] Iteration ${iteration + 1}/${MAX_ITERATIONS}`);
+	for (let iteration = 0; iteration < rc.maxIterations; iteration++) {
+		console.log(`[ReAct] Iteration ${iteration + 1}/${rc.maxIterations}`);
 
 		// THINK: Ask LLM what to do next
 		const decision = await askLLMToThink(context);
@@ -108,15 +115,15 @@ export async function runReActLoop(userQuery, currentURL, onStep = null) {
 		console.log(`[ReAct] Observation:`, observation);
 
 		// Check if we should bail out early - last 2-3 observations were unhelpful
-		if (iteration >= MIN_ITERATIONS_BEFORE_BAILOUT) {
+		if (iteration >= rc.minIterationsBeforeBailout) {
 			const recentObs = context.observations.slice(-3);
 			const unhelpfulCount = recentObs.filter(obs =>
 				obs.type === 'error' ||
 				obs.type === 'duplicate_fetch' ||
-				(obs.type === 'crawled_content' && (!obs.content || obs.content.length < MIN_USEFUL_CONTENT_LENGTH))
+				(obs.type === 'crawled_content' && (!obs.content || obs.content.length < rc.minUsefulContentLength))
 			).length;
 
-			if (unhelpfulCount >= UNHELPFUL_THRESHOLD) {
+			if (unhelpfulCount >= rc.unhelpfulThreshold) {
 				console.log(`[ReAct] Detected ${unhelpfulCount} unhelpful observations in last 3 - triggering early bailout`);
 
 				// Notify UI that we're bailing out
@@ -138,12 +145,12 @@ export async function runReActLoop(userQuery, currentURL, onStep = null) {
 	}
 
 	// Hit iteration limit without answering
-	console.log(`[ReAct] Hit max iterations (${MAX_ITERATIONS})`);
+	console.log(`[ReAct] Hit max iterations (${rc.maxIterations})`);
 
 	// Notify UI BEFORE asking LLM for final answer
 	if (onStep) {
 		onStep({
-			iteration: MAX_ITERATIONS,
+			iteration: rc.maxIterations,
 			action: 'max_depth_reached',
 		});
 	}
@@ -153,7 +160,7 @@ export async function runReActLoop(userQuery, currentURL, onStep = null) {
 
 	return {
 		answer: finalAnswer,
-		iterations: MAX_ITERATIONS,
+		iterations: rc.maxIterations,
 		hitLimit: true
 	};
 }
@@ -179,7 +186,7 @@ async function executeFetchURL(url) {
 	}
 
 	// Flag if content is suspiciously short (likely a PDF or unhelpful page)
-	const isLikelyUnhelpful = content.length < MIN_USEFUL_CONTENT_LENGTH;
+	const isLikelyUnhelpful = content.length < (getReactConfig().minUsefulContentLength);
 
 	return {
 		type: 'crawled_content',

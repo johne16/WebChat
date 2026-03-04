@@ -1,8 +1,10 @@
 // routes/proxy.js - LLM, Crawl4AI, and Brave Search proxy endpoints
 import { Router } from "express";
+import { appConfig } from "../config.js";
 import { getHistory, addMessage } from "../conversationHistory.js";
 import { chat as openaiChat } from "../providers/openai.js";
 import { chat as anthropicChat } from "../providers/anthropic.js";
+import { logMetric } from "../metricsLogger.js";
 
 const router = Router();
 
@@ -15,7 +17,7 @@ const providers = {
 // LLM chat endpoint (supports OpenAI and Anthropic via provider field)
 router.post("/api/openai/chat", async (req, res) => {
 	try {
-		const { model, messages, provider = "openai", userId = 1, storeInHistory = false } = req.body;
+		const { model, messages, provider = "openai", userId = 1, storeInHistory = false, flow } = req.body;
 		console.log("[LLM] Request received - provider:", provider, "model:", model, "messages:", messages?.length);
 
 		if (!model || !messages) {
@@ -45,7 +47,21 @@ router.post("/api/openai/chat", async (req, res) => {
 		];
 
 		console.log("[LLM] Calling", provider, "API... (history:", history.length, "messages injected)");
+		const startTime = Date.now();
 		const result = await chatFn(model, augmented);
+		const turnaroundMs = Date.now() - startTime;
+
+		// Log server-side metric
+		logMetric({
+			type: "llm_call",
+			scope: "server",
+			timestamp: new Date().toISOString(),
+			flow: flow || "unknown",
+			provider,
+			model,
+			turnaroundMs,
+			tokens: result.usage
+		});
 
 		// Store conversation turn in history if requested
 		if (storeInHistory) {
@@ -54,7 +70,7 @@ router.post("/api/openai/chat", async (req, res) => {
 			if (result.content) addMessage(userId, "assistant", result.content);
 		}
 
-		res.json({ content: result.content });
+		res.json({ content: result.content, usage: result.usage });
 	} catch (err) {
 		console.error("[LLM] Error:", err);
 		res.status(500).json({ error: String(err) });
@@ -85,7 +101,7 @@ router.post("/api/crawl", async (req, res) => {
 			return res.status(400).json({ error: "Missing or invalid urls array" });
 		}
 
-		const response = await fetch("http://localhost:11235/crawl", {
+		const response = await fetch(appConfig.server.crawl4ai.url, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
@@ -114,7 +130,7 @@ router.post("/api/search", async (req, res) => {
 	try {
 		// Item 8: Add [Search] log prefix
 		console.log("[Search] Received search request:", req.body);
-		const { query, count = 5 } = req.body;
+		const { query, count = appConfig.server.braveSearch.defaultCount } = req.body;
 
 		if (!query) {
 			return res.status(400).json({ error: "Missing query parameter" });
@@ -126,7 +142,7 @@ router.post("/api/search", async (req, res) => {
 		}
 
 		// Call Brave Search API
-		const searchUrl = new URL("https://api.search.brave.com/res/v1/web/search");
+		const searchUrl = new URL(appConfig.server.braveSearch.url);
 		searchUrl.searchParams.set("q", query);
 		searchUrl.searchParams.set("count", count.toString());
 
@@ -150,6 +166,22 @@ router.post("/api/search", async (req, res) => {
 		console.error("[Search] Error:", err);
 		res.status(500).json({ error: String(err) });
 	}
+});
+
+// Client-side metrics ingestion endpoint
+router.post("/api/metrics", (req, res) => {
+	const record = { ...req.body, scope: "client" };
+	logMetric(record);
+	res.json({ success: true });
+});
+
+// Config endpoint - expose providers + extension config to clients
+router.get("/api/config", (req, res) => {
+	res.json({
+		providers: appConfig.providers,
+		extension: appConfig.extension,
+		agent: { maxSteps: appConfig.agent.maxSteps }
+	});
 });
 
 export default router;

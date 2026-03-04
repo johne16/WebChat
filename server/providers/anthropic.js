@@ -1,5 +1,6 @@
 // providers/anthropic.js - Anthropic provider adapter
 import Anthropic from "@anthropic-ai/sdk";
+import { appConfig } from "../config.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -26,7 +27,7 @@ export async function chat(model, messages) {
 	const params = {
 		model,
 		messages: nonSystemMessages,
-		max_tokens: 4096
+		max_tokens: appConfig.server.anthropic.maxTokens
 	};
 
 	// Only include system param if there are system messages
@@ -36,5 +37,12 @@ export async function chat(model, messages) {
 
 	const response = await anthropic.messages.create(params);
 	const content = response?.content?.[0]?.text || "";
-	return { content };
+	// Normalize to OpenAI's token field names for consistent metrics
+	const raw = response?.usage;
+	const usage = raw ? {
+		prompt_tokens: raw.input_tokens,
+		completion_tokens: raw.output_tokens,
+		total_tokens: (raw.input_tokens || 0) + (raw.output_tokens || 0)
+	} : null;
+	return { content, usage };
 }

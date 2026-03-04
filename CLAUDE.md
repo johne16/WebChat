@@ -60,17 +60,16 @@ WebChat is a Chromium extension that adds an AI-powered side panel for exploring
    PORT=8787
    ```
 
-3. **Start All Services** (three terminals):
+3. **Start All Services** (two terminals):
    ```bash
    # Terminal 1: Crawl4AI
    docker run -p 11235:11235 unclecode/crawl4ai
 
    # Terminal 2: WebChat server
    cd server && npm start
-
-   # Terminal 3: Web Agent (for Agent Mode)
-   cd web_agent && python -m src.agent_service
    ```
+
+   The server spawns web agent processes on-demand when agent tasks are requested.
 
 ### Extension Installation
 
@@ -333,7 +332,7 @@ When adding tests in the future, colocate them beside the module (e.g., `extensi
 Extension uses `chrome.storage.local` for:
 - `isTestingMode`: Boolean toggle
 - `provider`: LLM provider (`'openai'` or `'anthropic'`, default: `'openai'`)
-- `modelType`: LLM model selection (default: `'gpt-5'`)
+- `modelType`: LLM model selection (default: `'gpt-5.2'`)
 - `encryptedUserProfile`: Encrypted user profile for agent mode (AES-256-GCM)
   - Contains standard fields (firstName, lastName, email, etc.)
   - Contains `siteData` object: `{ [domain]: { [fieldName]: value } }`
@@ -361,11 +360,8 @@ Changes are synchronized across extension contexts via `chrome.storage.onChanged
 # Terminal 1: Crawl4AI
 docker run -p 11235:11235 unclecode/crawl4ai
 
-# Terminal 2: WebChat server
+# Terminal 2: WebChat server (also spawns web agents on-demand)
 cd server && npm start
-
-# Terminal 3: Web Agent (for Agent Mode)
-cd web_agent && python -m src.agent_service
 ```
 
 ### Testing Mode
@@ -375,4 +371,4 @@ Toggle via settings ⚙️ to test UI without consuming API credits.
 - Panel DevTools: Right-click panel → Inspect
 - Background script: `chrome://extensions` → WebChat → Inspect views: background page
 - Server logs: Terminal where `npm start` is running
-- Agent logs: Terminal where `python -m src.agent_service` is running
+- Agent logs: Server terminal (agent stdout/stderr is piped through the server process)

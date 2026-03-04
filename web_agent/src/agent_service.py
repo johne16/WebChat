@@ -83,7 +83,7 @@ class ErrorDetail(BaseModel):
 class ExecuteGoalOptions(BaseModel):
     """Options for goal execution"""
     headless: bool = False
-    maxSteps: int = 20
+    maxSteps: int = config.MAX_AGENT_STEPS
     timeout: int = 60000  # ms
 
 
@@ -93,6 +93,8 @@ class ExecuteGoalRequest(BaseModel):
     startUrl: str = Field(..., description="URL to start from")
     userProfile: UserProfile = Field(..., description="User data for form filling")
     sessionId: Optional[str] = Field(None, description="Session ID to resume")
+    provider: Optional[str] = Field(None, description="LLM provider override")
+    model: Optional[str] = Field(None, description="LLM model override")
     options: Optional[ExecuteGoalOptions] = ExecuteGoalOptions()
 
 
@@ -140,6 +142,8 @@ class ContinueSessionRequest(BaseModel):
         default={},
         description="Additional user data fields (optional for awaiting_user_action)"
     )
+    provider: Optional[str] = Field(None, description="LLM provider for session resume")
+    model: Optional[str] = Field(None, description="LLM model for session resume")
 
 
 def _build_response(result: Dict[str, Any]) -> ExecuteGoalResponse:
@@ -200,8 +204,7 @@ def _build_response(result: Dict[str, Any]) -> ExecuteGoalResponse:
 # Create FastAPI app
 app = FastAPI(
     title="Autonomous Web Agent API",
-    description="Goal-driven web automation using LLM planning",
-    version="2.0.0"
+    description="Goal-driven web automation using LLM planning"
 )
 
 
@@ -224,7 +227,9 @@ async def execute_goal(request: ExecuteGoalRequest, raw_request: Request):
         db_path=db_path,
         callback_url=app_config.callback_url,
         port=app_config.port,
-        task_id=request.sessionId  # Use sessionId as taskId for now
+        task_id=request.sessionId,  # Use sessionId as taskId for now
+        provider=request.provider,
+        model=request.model
     )
 
     # Convert UserProfile to dict
@@ -306,7 +311,9 @@ async def continue_session(session_id: str, request: ContinueSessionRequest, raw
             db_path=db_path,
             callback_url=app_config.callback_url,
             port=app_config.port,
-            task_id=session_id
+            task_id=session_id,
+            provider=request.provider,
+            model=request.model
         )
 
     # Get goal and start URL from agent's memory
@@ -335,8 +342,7 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "service": "autonomous-web-agent",
-        "version": "2.0.0"
+        "service": "autonomous-web-agent"
     }
 
 
@@ -345,7 +351,6 @@ async def root():
     """Root endpoint with API information"""
     return {
         "message": "Autonomous Web Agent API",
-        "version": "2.0.0",
         "docs": "/docs",
         "health": "/health",
         "endpoint": "POST /api/execute-goal"

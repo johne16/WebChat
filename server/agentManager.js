@@ -16,9 +16,10 @@ export function getAvailablePort() {
 	return null;
 }
 
-// Wait for agent to become healthy
-async function waitForHealth(port, maxAttempts = AGENT_CONFIG.healthCheckMaxAttempts) {
+// Wait for agent to become healthy; abortCheck returns truthy to bail early
+async function waitForHealth(port, maxAttempts = AGENT_CONFIG.healthCheckMaxAttempts, abortCheck = null) {
 	for (let i = 0; i < maxAttempts; i++) {
+		if (abortCheck && abortCheck()) return false;
 		try {
 			const response = await fetch(`http://localhost:${port}/health`);
 			if (response.ok) {
@@ -74,6 +75,10 @@ function handleAgentExit(port, code, signal) {
 
 		// Item 1: Use shared helper
 		const agentProcess = createAgentProcess(port);
+		agentProcess.on("error", (err) => {
+			console.error(`[Agent:${port}] Restart spawn error: ${err.message}`);
+			agentsByPort.delete(port);
+		});
 		agentProcess.on("exit", (c, s) => handleAgentExit(port, c, s));
 
 		agent.process = agentProcess;
@@ -100,6 +105,16 @@ export async function spawnAgent(taskId) {
 	// Item 1: Use shared helper
 	const agentProcess = createAgentProcess(port);
 
+	// Track spawn errors so we can reject health check with the real cause
+	let spawnError = null;
+
+	// Catch spawn errors (e.g. missing Python venv) so they don't crash the server
+	agentProcess.on("error", (err) => {
+		console.error(`[Agent:${port}] Spawn error: ${err.message}`);
+		spawnError = err;
+		agentsByPort.delete(port);
+	});
+
 	// Handle process exit
 	agentProcess.on("exit", (code, signal) => {
 		console.log(`[Agent:${port}] Process exited with code ${code}, signal ${signal}`);
@@ -121,10 +136,13 @@ export async function spawnAgent(taskId) {
 		restartCount: 0
 	});
 
-	// Wait for agent to become healthy
-	const healthy = await waitForHealth(port);
+	// Wait for agent to become healthy (bail early on spawn error)
+	const healthy = await waitForHealth(port, AGENT_CONFIG.healthCheckMaxAttempts, () => spawnError);
 	if (!healthy) {
 		killAgent(port);
+		if (spawnError) {
+			throw new Error(`Agent failed to start: ${spawnError.message}`);
+		}
 		throw new Error("Agent failed to start (health check timeout)");
 	}
 
@@ -190,11 +208,11 @@ export function killAllAgents() {
 }
 
 // Item 2: Shared helper for forwarding continue-session requests to an agent
-export async function forwardContinueSession(port, sessionId, additionalData) {
+export async function forwardContinueSession(port, sessionId, additionalData, provider, model) {
 	const response = await fetch(`http://localhost:${port}/api/session/${sessionId}/continue`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ additionalData: additionalData || {} })
+		body: JSON.stringify({ additionalData: additionalData || {}, provider, model })
 	});
 
 	if (!response.ok) {

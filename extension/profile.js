@@ -3,6 +3,12 @@
 
 import { encryptProfile, decryptProfile } from './crypto.js';
 import { formatFieldLabel } from './ui.js';
+import { getConfig, loadConfig } from './config.js';
+
+// Load config from server (profile.html is a standalone page)
+await loadConfig();
+
+const MIN_PASSPHRASE_LENGTH = getConfig()?.extension?.profile?.minPassphraseLength || 4;
 
 // DOM elements
 const statusEl = document.getElementById('status');
@@ -79,8 +85,8 @@ createForm.addEventListener('submit', async (e) => {
 		return;
 	}
 
-	if (passphrase.length < 4) {
-		showMessage('Passphrase must be at least 4 characters');
+	if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
+		showMessage(`Passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters`);
 		return;
 	}
 
@@ -385,8 +391,8 @@ changePassphraseForm.addEventListener('submit', async (e) => {
 		return;
 	}
 
-	if (newPassphrase.length < 4) {
-		showMessage('New passphrase must be at least 4 characters.');
+	if (newPassphrase.length < MIN_PASSPHRASE_LENGTH) {
+		showMessage(`New passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters.`);
 		return;
 	}
 

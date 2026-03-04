@@ -1,7 +1,7 @@
 // extension/utils.js
 // Shared utility functions
 
-import { SERVER_BASE } from './config.js';
+import { SERVER_BASE, getConfig } from './config.js';
 
 /**
  * Crawl a page via Crawl4AI and return raw markdown
@@ -15,9 +15,9 @@ export async function crawlPage(url) {
 		body: JSON.stringify({
 			urls: [url],
 			crawler_config: {
-				exclude_external_links: true,
-				remove_overlay_elements: true,
-				word_count_threshold: 10
+				exclude_external_links: getConfig()?.extension?.crawl4ai?.excludeExternalLinks ?? true,
+				remove_overlay_elements: getConfig()?.extension?.crawl4ai?.removeOverlayElements ?? true,
+				word_count_threshold: getConfig()?.extension?.crawl4ai?.wordCountThreshold ?? 10
 			}
 		})
 	});

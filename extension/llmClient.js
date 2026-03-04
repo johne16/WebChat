@@ -1,10 +1,11 @@
 // extension/llmClient.js
 
-import { SERVER_BASE } from './config.js';
+import { SERVER_BASE, getConfig } from './config.js';
 import { crawlPage, parseJsonFromLLM } from './utils.js';
 
 // Cache modelType and provider at module level (item 4)
-let cachedModel = 'gpt-5';
+// Hardcoded defaults used until storage read completes
+let cachedModel = 'gpt-5.2';
 let cachedProvider = 'openai';
 
 // Initialize from storage
@@ -17,10 +18,10 @@ chrome.storage.local.get(['modelType', 'provider']).then(({ modelType, provider 
 chrome.storage.onChanged.addListener((changes, area) => {
 	if (area === 'local') {
 		if ('modelType' in changes) {
-			cachedModel = changes.modelType.newValue || 'gpt-5';
+			cachedModel = changes.modelType.newValue || getConfig()?.providers?.defaultModel || 'gpt-5.2';
 		}
 		if ('provider' in changes) {
-			cachedProvider = changes.provider.newValue || 'openai';
+			cachedProvider = changes.provider.newValue || getConfig()?.providers?.default || 'openai';
 		}
 	}
 });
@@ -36,11 +37,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
  * @param {string} [options.provider] - LLM provider ('openai' or 'anthropic')
  * @returns {Promise<Object>} Parsed response data
  */
-async function callLLM(model, messages, errorLabel = 'LLM', { userId = 1, storeInHistory = false, provider } = {}) {
+async function callLLM(model, messages, errorLabel = 'LLM', { userId = 1, storeInHistory = false, provider, flow } = {}) {
 	const res = await fetch(`${SERVER_BASE}/api/openai/chat`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ model, messages, userId, storeInHistory, provider: provider || cachedProvider })
+		body: JSON.stringify({ model, messages, userId, storeInHistory, provider: provider || cachedProvider, flow })
 	});
 
 	if (!res.ok) throw new Error(`${errorLabel} error ${res.status}`);
@@ -112,7 +113,7 @@ export async function sendToBot(userText, currentURL) {
 			role: 'user',
 			content: `Page URL: ${currentURL}\n\nPage content:\n${pageContent}\n\nUser question: ${userText}`
 		}
-	], 'LLM', { storeInHistory: true });
+	], 'LLM', { storeInHistory: true, flow: 'simple' });
 
 	const text = data?.content || '';
 	console.log('[llmClient] LLM response received, text length:', text.length);
@@ -159,7 +160,7 @@ Respond ONLY with valid JSON in this exact format (no markdown, no extra text):
 	const data = await callLLM(model, [
 		{ role: 'system', content: systemPrompt },
 		{ role: 'user', content: userPrompt }
-	], 'LLM Think');
+	], 'LLM Think', { flow: 'research' });
 
 	const responseText = data?.content || '';
 
@@ -204,7 +205,7 @@ Be honest about limitations.`;
 	const data = await callLLM(model, [
 		{ role: 'system', content: systemPrompt },
 		{ role: 'user', content: userPrompt }
-	], 'LLM Answer');
+	], 'LLM Answer', { flow: 'research' });
 
 	return data?.content || 'I was unable to generate an answer.';
 }
@@ -218,6 +219,6 @@ Be honest about limitations.`;
  * @returns {Promise<string>} Raw response content text
  */
 export async function callLLMForContent(model, messages, { provider } = {}) {
-	const data = await callLLM(model, messages, 'LLM', { provider });
+	const data = await callLLM(model, messages, 'LLM', { provider, flow: 'intent' });
 	return data?.content || '';
 }

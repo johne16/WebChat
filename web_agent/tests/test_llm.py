@@ -1,7 +1,7 @@
-"""Tests for llm.py - OpenAI client"""
+"""Tests for llm.py - LLM client (OpenAI + Anthropic)"""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, mock_open
+from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 from src.llm import LLMClient
 
@@ -10,7 +10,7 @@ def test_load_system_prompt():
     """Test system prompt loads from file"""
     # read_text() is called three times: system_prompt.txt, planning_prompt.txt, examples.json
     with patch('pathlib.Path.read_text', side_effect=["Test system prompt", "Planning prompt", "[]"]):
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
         assert client.system_prompt == "Test system prompt"
 
 
@@ -18,7 +18,7 @@ def test_load_examples():
     """Test examples load from file"""
     # read_text() is called three times: system_prompt.txt, planning_prompt.txt, examples.json
     with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", '[{"form_html": "test"}]']):
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
         assert len(client.examples) == 1
         assert client.examples[0]["form_html"] == "test"
 
@@ -26,7 +26,7 @@ def test_load_examples():
 def test_build_prompt_without_error(sample_user_profile, simple_form_html):
     """Test prompt construction without error context"""
     with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", "[]"]):
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
         client.examples = []
 
         messages = client._build_prompt(simple_form_html, sample_user_profile, None)
@@ -40,7 +40,7 @@ def test_build_prompt_without_error(sample_user_profile, simple_form_html):
 def test_build_prompt_with_error(sample_user_profile, simple_form_html):
     """Test prompt construction with error context"""
     with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", "[]"]):
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
         client.examples = []
 
         messages = client._build_prompt(
@@ -57,7 +57,7 @@ def test_build_prompt_with_error(sample_user_profile, simple_form_html):
 def test_extract_code_from_markdown():
     """Test code extraction from markdown code block"""
     with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", "[]"]):
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
 
         response = """```javascript
 async function fillForm() {
@@ -74,7 +74,7 @@ async function fillForm() {
 def test_extract_code_plain():
     """Test code extraction from plain response"""
     with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", "[]"]):
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
 
         response = "async function fillForm() {\n  await fillField('#email', 'test@example.com');\n}"
 
@@ -86,7 +86,7 @@ def test_extract_code_plain():
 def test_extract_code_mixed_text():
     """Test code extraction from mixed text and code"""
     with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", "[]"]):
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
 
         response = """Here's the code to fill the form:
 
@@ -112,13 +112,13 @@ async def test_generate_fill_code_success(sample_user_profile, simple_form_html)
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "async function fillForm() { await fillField('#email', 'test@example.com'); }"
         mock_response.usage.total_tokens = 150
-        mock_response.model = "gpt-5"
+        mock_response.model = "gpt-5.2"
 
         mock_client = MagicMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
         mock_openai.return_value = mock_client
 
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
         client.examples = []
 
         result = await client.generate_fill_code(simple_form_html, sample_user_profile)
@@ -139,7 +139,7 @@ async def test_generate_fill_code_api_error(sample_user_profile, simple_form_htm
         mock_client.chat.completions.create = AsyncMock(side_effect=Exception("API Error"))
         mock_openai.return_value = mock_client
 
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
         client.examples = []
 
         with pytest.raises(Exception) as exc_info:
@@ -157,13 +157,14 @@ async def test_generate_plan_success():
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = '{"action": "fill_form", "params": {}, "reasoning": "Fill the form", "goal_status": "in_progress"}'
+        mock_response.choices[0].finish_reason = "stop"
         mock_response.usage.total_tokens = 200
 
         mock_client = MagicMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
         mock_openai.return_value = mock_client
 
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
 
         result = await client.generate_plan(
             goal="Sign up",
@@ -187,7 +188,7 @@ async def test_generate_plan_api_error():
         mock_client.chat.completions.create = AsyncMock(side_effect=Exception("API Error"))
         mock_openai.return_value = mock_client
 
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
 
         result = await client.generate_plan(
             goal="Sign up",
@@ -204,7 +205,7 @@ async def test_generate_plan_api_error():
 def test_parse_plan_response_valid():
     """Test parsing valid plan response"""
     with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", "[]"]):
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
 
         content = '{"action": "click_link", "params": {"link_text": "Sign In"}, "reasoning": "Click sign in", "goal_status": "in_progress"}'
         result = client._parse_plan_response(content)
@@ -217,7 +218,7 @@ def test_parse_plan_response_valid():
 def test_parse_plan_response_invalid_json():
     """Test parsing invalid JSON returns blocked status"""
     with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", "[]"]):
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
 
         content = "This is not JSON at all"
         result = client._parse_plan_response(content)
@@ -230,7 +231,7 @@ def test_parse_plan_response_invalid_json():
 def test_build_planning_context():
     """Test building planning context string"""
     with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", "[]"]):
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
 
         memory_str = (
             "## Session Memory\n"
@@ -258,7 +259,7 @@ def test_build_planning_context():
 def test_parse_plan_response_needs_input():
     """Test parsing plan response with needs_input status and missing_fields"""
     with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", "[]"]):
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
 
         content = '{"action": "none", "params": {}, "reasoning": "Form requires birth city", "goal_status": "needs_input", "missing_fields": ["birthCity", "securityAnswer"]}'
         result = client._parse_plan_response(content)
@@ -272,7 +273,7 @@ def test_parse_plan_response_needs_input():
 def test_parse_plan_response_awaiting_user_action():
     """Test parsing plan response with awaiting_user_action status"""
     with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", "[]"]):
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
 
         content = '{"action": "none", "params": {}, "reasoning": "Page has a CAPTCHA", "goal_status": "awaiting_user_action"}'
         result = client._parse_plan_response(content)
@@ -285,7 +286,7 @@ def test_parse_plan_response_awaiting_user_action():
 def test_parse_plan_response_missing_fields_defaults_to_empty():
     """Test missing_fields defaults to empty list when not provided"""
     with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", "[]"]):
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
 
         content = '{"action": "fill_form", "params": {}, "reasoning": "Fill form", "goal_status": "in_progress"}'
         result = client._parse_plan_response(content)
@@ -301,13 +302,14 @@ async def test_generate_plan_needs_input():
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = '{"action": "none", "params": {}, "reasoning": "Missing birth city", "goal_status": "needs_input", "missing_fields": ["birthCity"]}'
+        mock_response.choices[0].finish_reason = "stop"
         mock_response.usage.total_tokens = 180
 
         mock_client = MagicMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
         mock_openai.return_value = mock_client
 
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
 
         result = await client.generate_plan(
             goal="Sign up",
@@ -329,13 +331,14 @@ async def test_generate_plan_awaiting_user_action():
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = '{"action": "none", "params": {}, "reasoning": "CAPTCHA detected", "goal_status": "awaiting_user_action"}'
+        mock_response.choices[0].finish_reason = "stop"
         mock_response.usage.total_tokens = 150
 
         mock_client = MagicMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
         mock_openai.return_value = mock_client
 
-        client = LLMClient(api_key="test-key")
+        client = LLMClient(api_key="test-key", provider="openai")
 
         result = await client.generate_plan(
             goal="Sign up",
@@ -346,3 +349,50 @@ async def test_generate_plan_awaiting_user_action():
 
         assert result["goal_status"] == "awaiting_user_action"
         assert result["action"] == "none"
+
+
+def test_anthropic_provider_init():
+    """Test LLMClient initializes with Anthropic provider"""
+    try:
+        import anthropic  # noqa: F401
+    except ImportError:
+        pytest.skip("anthropic package not installed")
+
+    with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", "[]"]):
+        client = LLMClient(api_key="test-key", provider="anthropic")
+        assert client.provider == "anthropic"
+
+
+@pytest.mark.asyncio
+async def test_call_anthropic_separates_system():
+    """Test that _call_anthropic correctly separates system messages"""
+    with patch('pathlib.Path.read_text', side_effect=["System prompt", "Planning prompt", "[]"]):
+        try:
+            from anthropic import AsyncAnthropic
+        except ImportError:
+            pytest.skip("anthropic package not installed")
+
+        with patch('anthropic.AsyncAnthropic') as mock_anthropic_class:
+            mock_response = MagicMock()
+            mock_response.content = [MagicMock(text='{"action": "fill_form"}')]
+            mock_response.usage = MagicMock(input_tokens=100, output_tokens=50)
+            mock_response.stop_reason = "end_turn"
+
+            mock_client_instance = MagicMock()
+            mock_client_instance.messages.create = AsyncMock(return_value=mock_response)
+            mock_anthropic_class.return_value = mock_client_instance
+
+            client = LLMClient(api_key="test-key", provider="anthropic")
+
+            result = await client._call_anthropic([
+                {"role": "system", "content": "You are helpful"},
+                {"role": "user", "content": "Hello"}
+            ], max_tokens=100)
+
+            # Verify system was separated
+            call_kwargs = mock_client_instance.messages.create.call_args[1]
+            assert call_kwargs["system"] == "You are helpful"
+            assert len(call_kwargs["messages"]) == 1
+            assert call_kwargs["messages"][0]["role"] == "user"
+            assert result["content"] == '{"action": "fill_form"}'
+            assert result["tokens_used"] == 150

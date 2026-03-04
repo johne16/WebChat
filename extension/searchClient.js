@@ -1,11 +1,15 @@
 // extension/searchClient.js
 
-import { SERVER_BASE } from './config.js';
+import { SERVER_BASE, getConfig } from './config.js';
 import { extractDomain } from './utils.js';
 
-// Rate limiting: Track last search time to enforce 1 request/second
+// Rate limiting: Track last search time
 let lastSearchTime = 0;
-const MIN_SEARCH_INTERVAL = 1000; // 1 second in milliseconds
+// Read at call time (not module init) so loadConfig() has completed.
+function getSearchConfig() {
+	const s = getConfig()?.extension?.search || {};
+	return { rateLimitMs: s.rateLimitMs || 1000, defaultCount: s.defaultCount || 5 };
+}
 
 /**
  * Search the web using Brave Search API (via server proxy)
@@ -15,7 +19,9 @@ const MIN_SEARCH_INTERVAL = 1000; // 1 second in milliseconds
  * @param {string} currentURL - Optional URL of current tab to restrict search to that domain
  * @returns {Promise<Array>} - Array of search results with title, url, description
  */
-export async function searchBrave(query, count = 5, currentURL = null) {
+export async function searchBrave(query, count = null, currentURL = null) {
+	const sc = getSearchConfig();
+	if (count === null) count = sc.defaultCount;
 	// If currentURL provided, prepend site: restriction to query
 	let finalQuery = query;
 	if (currentURL) {
@@ -31,8 +37,8 @@ export async function searchBrave(query, count = 5, currentURL = null) {
 	// Rate limiting: Wait if we searched too recently
 	const now = Date.now();
 	const timeSinceLastSearch = now - lastSearchTime;
-	if (timeSinceLastSearch < MIN_SEARCH_INTERVAL) {
-		const waitTime = MIN_SEARCH_INTERVAL - timeSinceLastSearch;
+	if (timeSinceLastSearch < sc.rateLimitMs) {
+		const waitTime = sc.rateLimitMs - timeSinceLastSearch;
 		console.log(`[SearchClient] Rate limiting: waiting ${waitTime}ms`);
 		await new Promise(resolve => setTimeout(resolve, waitTime));
 	}

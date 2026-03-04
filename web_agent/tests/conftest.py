@@ -19,10 +19,11 @@ async def browser():
 def mock_llm_client():
     """Mock LLM client for testing without API calls"""
     mock = MagicMock()
+    mock.provider = "openai"
     mock.generate_fill_code = AsyncMock(return_value={
         "code": "async function fillForm() { await fillField('#email', 'test@example.com'); await clickButton('button[type=\"submit\"]'); }",
         "tokens_used": 150,
-        "model": "gpt-5",
+        "model": "gpt-5.2",
         "reasoning": None
     })
     mock.generate_plan = AsyncMock(return_value={

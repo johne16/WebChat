@@ -8,6 +8,7 @@ from src.browser import BrowserManager
 from src.execution_engine import ExecutionEngine
 from src.memory import SessionMemory
 from src.llm import LLMClient
+from src.config import config
 
 
 @dataclass
@@ -176,7 +177,7 @@ class ActionExecutor:
                 wait_task = asyncio.create_task(
                     self.browser.page.wait_for_url(
                         lambda url: url != current_url,
-                        timeout=5000
+                        timeout=config.NAVIGATION_TIMEOUT
                     )
                 )
 
@@ -253,7 +254,7 @@ class ActionExecutor:
 
             # Wait for any navigation
             nav_t0 = time.perf_counter()
-            await self.browser.page.wait_for_load_state("networkidle")
+            await self.browser.page.wait_for_load_state(config.WAIT_POLICY)
             nav_wait = time.perf_counter() - nav_t0
 
             new_url = self.browser.page.url
@@ -321,7 +322,7 @@ class ActionExecutor:
             ActionResult
         """
         direction = params.get("direction", "down")
-        amount = params.get("amount", 500)
+        amount = params.get("amount", config.SCROLL_PIXELS)
 
         await self.browser.scroll(direction, amount)
 
@@ -341,7 +342,7 @@ class ActionExecutor:
             ActionResult
         """
         selector = params.get("selector")
-        timeout = params.get("timeout", 5000)
+        timeout = params.get("timeout", config.EXECUTION_WAIT_TIMEOUT)
 
         if not selector:
             return ActionResult(

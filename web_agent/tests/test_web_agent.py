@@ -15,7 +15,7 @@ def temp_db():
     """Use temporary database for tests"""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test_sessions.db"
-        with patch.object(SessionMemory, 'DB_PATH', db_path):
+        with patch.object(SessionMemory, 'DEFAULT_DB_PATH', db_path):
             yield db_path
 
 
@@ -26,9 +26,13 @@ def mock_config():
         mock.HEADLESS = True
         mock.BROWSER_TIMEOUT = 30000
         mock.OPENAI_API_KEY = "test-key"
-        mock.OPENAI_MODEL = "gpt-5"
+        mock.ANTHROPIC_API_KEY = ""
+        mock.OPENAI_MODEL = "gpt-5.2"
+        mock.PROVIDER = "openai"
         mock.TEMPERATURE = 0.1
         mock.MAX_AGENT_STEPS = 20
+        mock.CONSECUTIVE_FAILURE_THRESHOLD = 3
+        mock.RECENT_ACTION_LOOKBACK = 5
         mock.DEBUG = False
         yield mock
 
@@ -42,12 +46,17 @@ def mock_browser():
         browser.close = AsyncMock()
         browser.navigate = AsyncMock(return_value={"success": True, "error": None})
         browser.page = MagicMock()
-        browser.page.url = "http://example.com"
+        browser.page.url = "about:blank"
         browser.get_page_title = AsyncMock(return_value="Test Page")
         browser.get_form_elements = AsyncMock(return_value="<form></form>")
         browser.get_page_links = AsyncMock(return_value=None)
         browser.get_page_buttons = AsyncMock(return_value=None)
         browser.get_readable_content = AsyncMock(return_value="Page content")
+        browser.build_page_context = AsyncMock(return_value={
+            "context": "## Current Page\nURL: http://example.com\nTitle: Test Page\n\n## Page Content\nPage content",
+            "timings": {"pageExtraction": 0.01},
+            "pageContextSize": 100
+        })
         mock_class.return_value = browser
         yield browser
 
@@ -57,6 +66,7 @@ def mock_llm():
     """Mock LLM client"""
     with patch('src.web_agent.LLMClient') as mock_class:
         llm = MagicMock()
+        llm.provider = "openai"
         llm.generate_plan = AsyncMock(return_value={
             "action": "fill_form",
             "params": {"submit": True},
@@ -308,11 +318,14 @@ class TestAutonomousWebAgent:
     async def test_build_page_context(
         self, temp_db, mock_config, mock_browser, mock_llm
     ):
-        """Test page context building"""
-        agent = AutonomousWebAgent()
-        agent.browser = mock_browser
+        """Test page context building via browser"""
+        from src.browser import BrowserManager
+        mock_browser.page.url = "http://example.com"
+        # Call the real build_page_context using unbound method on the mock
+        mock_browser.build_page_context = lambda: BrowserManager.build_page_context(mock_browser)
 
-        context = await agent._build_page_context()
+        result = await mock_browser.build_page_context()
+        context = result["context"]
 
         assert "Current Page" in context
         assert "http://example.com" in context
@@ -323,14 +336,14 @@ class TestAutonomousWebAgent:
         self, temp_db, mock_config, mock_browser, mock_llm
     ):
         """Test that empty sections are excluded from context"""
+        from src.browser import BrowserManager
         mock_browser.get_form_elements = AsyncMock(return_value=None)
         mock_browser.get_page_links = AsyncMock(return_value=None)
         mock_browser.get_page_buttons = AsyncMock(return_value=None)
+        mock_browser.build_page_context = lambda: BrowserManager.build_page_context(mock_browser)
 
-        agent = AutonomousWebAgent()
-        agent.browser = mock_browser
-
-        context = await agent._build_page_context()
+        result = await mock_browser.build_page_context()
+        context = result["context"]
 
         assert "Forms on Page" not in context
         assert "Available Links" not in context

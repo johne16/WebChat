@@ -3,11 +3,12 @@
 
 import { callLLMForContent } from './llmClient.js';
 import { parseJsonFromLLM } from './utils.js';
+import { getConfig } from './config.js';
 
-// Intent detection uses gpt-4o-mini regardless of user's model selection.
-// This is intentional: intent classification needs to be fast and cheap,
-// and doesn't benefit from larger models.
-const INTENT_MODEL = 'gpt-4o-mini';
+// Intent detection uses a small, cheap model regardless of user's model selection.
+// Read from config at call time (not module init) so loadConfig() has completed.
+function getIntentModel() { return getConfig()?.providers?.intentModel || 'gpt-4o-mini'; }
+function getIntentProvider() { return getConfig()?.providers?.intentProvider || 'openai'; }
 
 // Action verbs that indicate agent tasks (single source of truth)
 const ACTION_VERB_PATTERN = /(sign up|signup|sign me up|register|fill out|fill in|apply|book|order|buy|purchase|create account|log in|login|submit|enroll|subscribe|checkout|check out)/;
@@ -98,10 +99,10 @@ User message: "${text}"
 Classify this intent.`;
 
 	try {
-		const content = await callLLMForContent(INTENT_MODEL, [
+		const content = await callLLMForContent(getIntentModel(), [
 			{ role: 'system', content: systemPrompt },
 			{ role: 'user', content: userPrompt }
-		], { provider: 'openai' });
+		], { provider: getIntentProvider() });
 
 		const result = parseJsonFromLLM(content);
 		return {
@@ -134,18 +135,9 @@ export async function detectIntent(text, currentUrl) {
 	// Check for explicit URL first
 	const explicitUrl = extractUrl(text);
 
-	// Heuristic bypass: obvious non-agent tasks
+	// Heuristic bypass: obvious non-agent tasks go to LLM for simple vs research
 	if (isObviouslyNotAgentTask(text)) {
-		// Still need to distinguish simple vs research
-		// Simple heuristic: if it references "this page" or is about current content, it's simple
-		const refersToCurrentPage = /this (page|article|site|post|website)/.test(text.toLowerCase());
-
-		return {
-			intent: refersToCurrentPage ? INTENT.SIMPLE : INTENT.RESEARCH,
-			url: null,
-			confidence: 'high',
-			reasoning: 'Heuristic: question pattern detected'
-		};
+		return await detectIntentWithLLM(text, currentUrl);
 	}
 
 	// Has explicit URL + action words = likely agent task

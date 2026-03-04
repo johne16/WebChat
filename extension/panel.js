@@ -1,7 +1,7 @@
 // extension/panel.js
 // Main entry point - unified message handling with SSE integration
 
-import { SERVER_BASE } from './config.js';
+import { SERVER_BASE, loadConfig, getConfig } from './config.js';
 import { sendToBot } from './llmClient.js';
 import { runReActLoop } from './react.js';
 import { connectSSE, disconnectSSE } from './agentClient.js';
@@ -45,8 +45,17 @@ const bannerContinue = document.getElementById('banner-continue');
 let isTestingMode = false;
 let pendingAgentRequest = null;  // Stores {text, url} when awaiting confirmation
 let lastSeenTimestamp = 0;       // For SSE reconnect deduplication
-let agentNumber = 0;             // Sequential agent counter (increments per session)
-const MAX_AGENT_STEPS = 20;      // Default max steps from web agent config
+
+// Load config from server (populates getConfig() for all modules)
+await loadConfig().catch(() => {});
+
+// Read agent max steps from server config (used for progress bar denominator)
+function getMaxAgentSteps() { return getConfig()?.agent?.maxSteps || 20; }
+
+// Derive agent display number from port (5001 → 1, 5002 → 2, etc.)
+function agentLabel(port) {
+	return port ? `Agent ${port % 10}` : 'Agent';
+}
 
 // Load settings (wrapped in try/catch for top-level await safety)
 try {
@@ -138,15 +147,17 @@ function handleAgentStatusEvent(data) {
 
 	if (!isOurSession(data)) return;
 
+	const label = agentLabel(data.port);
+
 	switch (data.status) {
 		case 'started':
-			updateHeaderProgress(`Agent ${agentNumber}: Starting...`);
+			updateHeaderProgress(`${label}: Starting...`);
 			showStopButton();
 			break;
 		case 'step_completed': {
 			const step = data.data?.step || '?';
 			const action = data.data?.action || 'working';
-			updateHeaderProgress(`Agent ${agentNumber}: ${action}... (${step}/${MAX_AGENT_STEPS})`);
+			updateHeaderProgress(`${label}: ${action}... (${step}/${getMaxAgentSteps()})`);
 			break;
 		}
 		case 'achieved':
@@ -178,7 +189,7 @@ function handleNeedsInputEvent(data) {
 	addMessage('bot', data.message || 'Please provide the missing information:');
 
 	renderInputForm(data.missingFields, null, async (formData) => {
-		updateHeaderProgress(`Agent ${agentNumber}: Continuing...`);
+		updateHeaderProgress(`${agentLabel(data.port)}: Continuing...`);
 		try {
 			await provideAgentInput(formData);
 		} catch (error) {
@@ -243,15 +254,34 @@ form.addEventListener('submit', async (e) => {
 });
 
 // =============================================================================
+// Metrics Helper
+// =============================================================================
+
+function postMetrics(record) {
+	fetch(`${SERVER_BASE}/api/metrics`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(record)
+	}).catch((err) => console.warn('[Panel] Metrics post failed:', err.message));
+}
+
+// =============================================================================
 // Intent Handlers
 // =============================================================================
 
 async function handleSimpleIntent(text, currentUrl) {
+	const startTime = Date.now();
 	try {
 		const botResponse = await sendToBot(text, currentUrl);
 		if (botResponse?.text) {
 			addMessage('bot', botResponse.text);
 		}
+		postMetrics({
+			type: 'flow_complete',
+			flow: 'simple',
+			timestamp: new Date().toISOString(),
+			turnaroundMs: Date.now() - startTime
+		});
 	} catch (error) {
 		console.error('[Panel] Simple mode error:', error);
 		addMessage('bot', `Error: ${error.message}`);
@@ -259,10 +289,13 @@ async function handleSimpleIntent(text, currentUrl) {
 }
 
 async function handleResearchIntent(text, currentUrl) {
+	const startTime = Date.now();
+	const actions = [];
 	try {
 		updateHeaderProgress('Researching...');
 
 		const result = await runReActLoop(text, currentUrl, (stepInfo) => {
+			actions.push(stepInfo.action);
 			const desc = getActionDescription(stepInfo);
 			updateHeaderProgress(desc);
 		});
@@ -271,13 +304,24 @@ async function handleResearchIntent(text, currentUrl) {
 		const answer = result.answer || 'I was unable to find an answer to your question.';
 		addMessage('bot', answer);
 
+		postMetrics({
+			type: 'flow_complete',
+			flow: 'research',
+			timestamp: new Date().toISOString(),
+			turnaroundMs: Date.now() - startTime,
+			iterations: result.iterations,
+			actions,
+			bailedOut: result.bailedOut || false,
+			hitLimit: result.hitLimit || false
+		});
+
 		// Store the user query and final answer in conversation history
 		try {
 			await fetch(`${SERVER_BASE}/api/history/add`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					userId: 1,
+					userId: getConfig()?.extension?.userId || 1,
 					messages: [
 						{ role: 'user', content: text },
 						{ role: 'assistant', content: answer }
@@ -343,14 +387,13 @@ async function executeAgentTask(goal, url) {
 	try {
 		// Start agent if not already running
 		if (!hasActiveSession()) {
-			agentNumber++;
-			updateHeaderProgress(`Agent ${agentNumber}: Starting...`);
 			const taskId = `task-${Date.now()}`;
 			await startAgentSession(taskId);
 			showStopButton();
 		}
 
-		updateHeaderProgress(`Agent ${agentNumber}: Working...`);
+		const label = agentLabel(getAgentSession().port);
+		updateHeaderProgress(`${label}: Working...`);
 		const result = await executeAgentGoal(goal, url);
 
 		// Handle immediate response (non-SSE path for backwards compatibility)
@@ -428,7 +471,7 @@ onPasswordModal({
 
 bannerContinue.addEventListener('click', async () => {
 	hideStickyBanner();
-	updateHeaderProgress(`Agent ${agentNumber}: Continuing...`);
+	updateHeaderProgress(`${agentLabel(getAgentSession().port)}: Continuing...`);
 
 	try {
 		await provideAgentInput({});

@@ -1,6 +1,8 @@
 // server/conversationHistory.js - In-memory conversation history for LLM context
+import { appConfig } from "./config.js";
 
-const TOKEN_LIMIT = 4000;
+const TOKEN_LIMIT = appConfig.server.conversationHistory.tokenLimit;
+const CHARS_PER_TOKEN = appConfig.server.conversationHistory.charsPerToken;
 
 /** @type {Map<number, Array<{role: string, content: string}>>} */
 const history = new Map();
@@ -11,7 +13,7 @@ const history = new Map();
  * @returns {number} Estimated token count
  */
 function estimateTokens(content) {
-	return Math.ceil(content.length / 4);
+	return Math.ceil(content.length / CHARS_PER_TOKEN);
 }
 
 /**

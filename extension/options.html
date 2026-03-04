@@ -29,10 +29,10 @@
 		</div>
 	</section>
 
-	<!-- LLM Models -->
-	<section aria-labelledby="llm-models">
-		<h2 id="llm-models">LLM Models</h2>
-		<form id="modelForm" role="radiogroup" aria-labelledby="llm-models">
+	<!-- Chat Model -->
+	<section aria-labelledby="chat-model">
+		<h2 id="chat-model">Chat Model</h2>
+		<form id="modelForm" role="radiogroup" aria-labelledby="chat-model">
 			<div class="model-grid">
 				<div class="model-grid-header"></div>
 				<div class="model-grid-header">OpenAI</div>
@@ -47,8 +47,32 @@
 				<label class="model"><input type="radio" name="model" value="anthropic:claude-sonnet-4-6"/><span>claude-sonnet-4-6</span></label>
 
 				<div class="model-grid-row-label">Large</div>
-				<label class="model"><input type="radio" name="model" value="openai:gpt-5" checked/><span>gpt-5</span></label>
+				<label class="model"><input type="radio" name="model" value="openai:gpt-5.2" checked/><span>gpt-5.2</span></label>
 				<label class="model"><input type="radio" name="model" value="anthropic:claude-opus-4-6"/><span>claude-opus-4-6</span></label>
+			</div>
+		</form>
+	</section>
+
+	<!-- Agent Model -->
+	<section aria-labelledby="agent-model">
+		<h2 id="agent-model">Agent Model</h2>
+		<form id="agentModelForm" role="radiogroup" aria-labelledby="agent-model">
+			<div class="model-grid">
+				<div class="model-grid-header"></div>
+				<div class="model-grid-header">OpenAI</div>
+				<div class="model-grid-header">Anthropic</div>
+
+				<div class="model-grid-row-label">Small</div>
+				<label class="model"><input type="radio" name="agentModel" value="openai:gpt-5-nano"/><span>gpt-5-nano</span></label>
+				<label class="model"><input type="radio" name="agentModel" value="anthropic:claude-haiku-4-5"/><span>claude-haiku-4-5</span></label>
+
+				<div class="model-grid-row-label">Mid</div>
+				<label class="model"><input type="radio" name="agentModel" value="openai:gpt-5-mini"/><span>gpt-5-mini</span></label>
+				<label class="model"><input type="radio" name="agentModel" value="anthropic:claude-sonnet-4-6"/><span>claude-sonnet-4-6</span></label>
+
+				<div class="model-grid-row-label">Large</div>
+				<label class="model"><input type="radio" name="agentModel" value="openai:gpt-5.2" checked/><span>gpt-5.2</span></label>
+				<label class="model"><input type="radio" name="agentModel" value="anthropic:claude-opus-4-6"/><span>claude-opus-4-6</span></label>
 			</div>
 		</form>
 	</section>

@@ -226,7 +226,7 @@ All configuration is managed via `.env` file and `src/config.py`:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENAI_API_KEY` | (required) | Your OpenAI API key |
-| `OPENAI_MODEL` | `gpt-5` | OpenAI model to use |
+| `OPENAI_MODEL` | `gpt-5.2` | OpenAI model to use |
 | `PORT` | `5001` | Server port |
 | `DEBUG` | `true` | Enable debug logging |
 | `HEADLESS` | `false` | Run browser in headless mode |

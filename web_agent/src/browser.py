@@ -5,6 +5,7 @@ import logging
 import time
 from typing import Optional, Dict, Any
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, TimeoutError
+from src.config import config
 
 
 logger = logging.getLogger(__name__)
@@ -115,21 +116,24 @@ JS_EXTRACT_BUTTONS = """
 }
 """
 
-JS_EXTRACT_CONTENT = """
-() => {
+def _build_js_extract_content(max_chars):
+    return f"""
+() => {{
     const clone = document.body.cloneNode(true);
     clone.querySelectorAll('script, style, noscript, iframe').forEach(el => el.remove());
 
     let text = clone.innerText || clone.textContent || '';
     text = text.replace(/\\s+/g, ' ').trim();
 
-    if (text.length > 3000) {
-        text = text.substring(0, 3000) + '...';
-    }
+    if (text.length > {max_chars}) {{
+        text = text.substring(0, {max_chars}) + '...';
+    }}
 
     return text;
-}
+}}
 """
+
+JS_EXTRACT_CONTENT = _build_js_extract_content(config.CONTENT_MAX_CHARS)
 
 JS_SCROLL = "window.scrollBy(0, {amount})"
 
@@ -158,7 +162,17 @@ class BrowserManager:
             return
 
         self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(headless=self.headless)
+        try:
+            self.browser = await self.playwright.chromium.launch(headless=self.headless)
+        except Exception as e:
+            await self.playwright.stop()
+            self.playwright = None
+            if "Executable doesn't exist" in str(e):
+                raise RuntimeError(
+                    "Playwright Chromium browser not installed. "
+                    "Run 'playwright install chromium' to fix."
+                ) from e
+            raise
         self.context = await self.browser.new_context()
         self.page = await self.context.new_page()
         self.page.set_default_timeout(self.timeout)
@@ -177,7 +191,7 @@ class BrowserManager:
             {"success": bool, "error": {"type": str, "message": str, "details": dict} | None}
         """
         try:
-            await self.page.goto(url, wait_until="networkidle")
+            await self.page.goto(url, wait_until=config.WAIT_POLICY)
             return {"success": True, "error": None}
         except TimeoutError as e:
             return {"success": False, "error": {"type": "timeout_error", "message": str(e), "details": {"url": url}}}
@@ -200,7 +214,6 @@ class BrowserManager:
         Returns:
             Preprocessed form HTML string, or None if no forms found
         """
-        from src.config import config
         try:
             result = await self.page.evaluate(JS_EXTRACT_FORMS)
             form_data = json.loads(result)
@@ -212,9 +225,8 @@ class BrowserManager:
             if config.DEBUG:
                 raw_html = await self.get_raw_html()
 
-                # Rough token estimate: 1 token ≈ 4 characters
-                raw_tokens = len(raw_html) / 4
-                preprocessed_tokens = len(preprocessed_html) / 4
+                raw_tokens = len(raw_html) / config.CHARS_PER_TOKEN
+                preprocessed_tokens = len(preprocessed_html) / config.CHARS_PER_TOKEN
 
                 if raw_tokens > 0:
                     reduction_pct = ((raw_tokens - preprocessed_tokens) / raw_tokens) * 100
@@ -321,7 +333,7 @@ class BrowserManager:
                 }
             }
 
-    async def wait_for_navigation(self, timeout: int = 5000) -> bool:
+    async def wait_for_navigation(self, timeout: int = None) -> bool:
         """Check if page navigated after an action
 
         Args:
@@ -330,6 +342,8 @@ class BrowserManager:
         Returns:
             True if navigation occurred, False otherwise
         """
+        if timeout is None:
+            timeout = config.NAVIGATION_TIMEOUT
         current_url = self.page.url
 
         try:
@@ -424,18 +438,20 @@ class BrowserManager:
             {"success": bool, "error": {"type": str, "message": str, "details": dict} | None}
         """
         try:
-            await self.page.go_back(wait_until="networkidle")
+            await self.page.go_back(wait_until=config.WAIT_POLICY)
             return {"success": True, "error": None}
         except Exception as e:
             return {"success": False, "error": {"type": "navigation_error", "message": str(e), "details": {}}}
 
-    async def scroll(self, direction: str = "down", amount: int = 500) -> None:
+    async def scroll(self, direction: str = "down", amount: int = None) -> None:
         """Scroll the page
 
         Args:
             direction: "up" or "down"
             amount: Pixels to scroll
         """
+        if amount is None:
+            amount = config.SCROLL_PIXELS
         scroll_amount = amount if direction == "down" else -amount
         await self.page.evaluate(JS_SCROLL.format(amount=scroll_amount))
 

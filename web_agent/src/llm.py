@@ -1,4 +1,4 @@
-"""OpenAI client for generating form-filling JavaScript code"""
+"""LLM client for generating form-filling JavaScript code and planning"""
 
 import json
 import logging
@@ -14,19 +14,36 @@ logger = logging.getLogger(__name__)
 
 
 class LLMClient:
-    """Handles OpenAI API communication for code generation and planning"""
+    """Handles LLM API communication for code generation and planning.
 
-    def __init__(self, api_key: str, model: str = "gpt-5", temperature: float = 0.1):
-        """Initialize OpenAI client
+    Supports OpenAI and Anthropic providers.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-5.2",
+        temperature: float = 0.1,
+        provider: str = "openai"
+    ):
+        """Initialize LLM client
 
         Args:
-            api_key: OpenAI API key
-            model: Model name (default: gpt-5)
-            temperature: Sampling temperature (default: 0.1 for deterministic code)
+            api_key: API key for the provider
+            model: Model name
+            temperature: Sampling temperature
+            provider: 'openai' or 'anthropic'
         """
-        self.client = AsyncOpenAI(api_key=api_key)
+        self.provider = provider
         self.model = model
         self.temperature = temperature
+
+        if provider == "anthropic":
+            from anthropic import AsyncAnthropic
+            self.client = AsyncAnthropic(api_key=api_key)
+        else:
+            self.client = AsyncOpenAI(api_key=api_key)
+
         self.system_prompt = self._load_system_prompt()
         self.planning_prompt = self._load_planning_prompt()
         self.examples = self._load_examples()
@@ -62,6 +79,102 @@ class LLMClient:
             # Examples are optional
             return []
 
+    async def _call_llm(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: int = 2000,
+        json_mode: bool = False
+    ) -> Dict[str, Any]:
+        """Dispatch to provider-specific LLM call
+
+        Args:
+            messages: Chat messages array
+            max_tokens: Max completion tokens
+            json_mode: Whether to request JSON output (OpenAI only)
+
+        Returns:
+            {"content": str, "tokens_used": int, "model": str, "finish_reason": str}
+        """
+        if self.provider == "anthropic":
+            return await self._call_anthropic(messages, max_tokens)
+        return await self._call_openai(messages, max_tokens, json_mode)
+
+    async def _call_openai(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: int = 2000,
+        json_mode: bool = False
+    ) -> Dict[str, Any]:
+        """Call OpenAI API
+
+        Args:
+            messages: Chat messages
+            max_tokens: Max tokens
+            json_mode: Request JSON response format
+
+        Returns:
+            Normalized response dict
+        """
+        kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "max_completion_tokens": max_tokens
+        }
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        response = await self.client.chat.completions.create(**kwargs)
+        return {
+            "content": response.choices[0].message.content,
+            "tokens_used": response.usage.total_tokens,
+            "model": response.model,
+            "finish_reason": response.choices[0].finish_reason
+        }
+
+    async def _call_anthropic(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: int = 2000
+    ) -> Dict[str, Any]:
+        """Call Anthropic API
+
+        Separates system messages from the rest (Anthropic uses a separate system param).
+
+        Args:
+            messages: Chat messages (may contain system-role messages)
+            max_tokens: Max tokens
+
+        Returns:
+            Normalized response dict
+        """
+        system_parts = []
+        non_system = []
+
+        for msg in messages:
+            if msg["role"] == "system":
+                system_parts.append(msg["content"])
+            else:
+                non_system.append({"role": msg["role"], "content": msg["content"]})
+
+        kwargs = {
+            "model": self.model,
+            "messages": non_system,
+            "max_tokens": max_tokens
+        }
+        if system_parts:
+            kwargs["system"] = "\n".join(system_parts)
+
+        response = await self.client.messages.create(**kwargs)
+        content = response.content[0].text if response.content else ""
+        tokens_used = (response.usage.input_tokens + response.usage.output_tokens) if response.usage else 0
+
+        return {
+            "content": content,
+            "tokens_used": tokens_used,
+            "model": self.model,
+            "finish_reason": response.stop_reason
+        }
+
     async def generate_fill_code(
         self,
         form_html: str,
@@ -77,35 +190,27 @@ class LLMClient:
 
         Returns:
             {
-                "code": str,              # Generated JavaScript
-                "tokens_used": int,       # Total tokens
-                "model": str,             # Model used
-                "reasoning": str | None   # If available
+                "code": str,
+                "tokens_used": int,
+                "model": str,
+                "reasoning": str | None
             }
         """
-        # Build messages
         messages = self._build_prompt(form_html, user_profile, error_context)
 
-        # Call OpenAI API
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_completion_tokens=2000
-            )
-
-            # Extract code from response
-            code = self._extract_code(response.choices[0].message.content)
+            result = await self._call_llm(messages, max_tokens=2000)
+            code = self._extract_code(result["content"])
 
             return {
                 "code": code,
-                "tokens_used": response.usage.total_tokens,
-                "model": response.model,
-                "reasoning": None  # GPT-5 may include reasoning, add if needed
+                "tokens_used": result["tokens_used"],
+                "model": result["model"],
+                "reasoning": None
             }
 
         except Exception as e:
-            raise Exception(f"OpenAI API error: {str(e)}")
+            raise Exception(f"LLM API error: {str(e)}")
 
     async def generate_plan(
         self,
@@ -119,45 +224,37 @@ class LLMClient:
         Args:
             goal: User's goal string
             page_context: Formatted page state from PageAnalyzer
-            memory_context: Pre-formatted memory context string from SessionMemory.format_context_for_llm()
+            memory_context: Pre-formatted memory context string
             user_profile: User profile data
 
         Returns:
             {
-                "action": str,           # Action type
-                "params": dict,          # Action parameters
-                "reasoning": str,        # Why this action
-                "goal_status": str,      # "in_progress", "achieved", "blocked"
-                "tokens_used": int       # Total tokens
+                "action": str,
+                "params": dict,
+                "reasoning": str,
+                "goal_status": str,
+                "tokens_used": int
             }
         """
         t0 = time.perf_counter()
 
-        # Build planning prompt
         messages = [
             {"role": "system", "content": self.planning_prompt}
         ]
 
-        # Build user message with all context
         user_msg = self._build_planning_context(
             goal, page_context, memory_context, user_profile
         )
         messages.append({"role": "user", "content": user_msg})
 
         if config.DEBUG:
-            logger.debug(f"[LLM] Sending request - model: {self.model}, context length: {len(user_msg)} chars")
+            logger.debug(f"[LLM] Sending request - provider: {self.provider}, model: {self.model}, context length: {len(user_msg)} chars")
 
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_completion_tokens=2000,
-                response_format={"type": "json_object"}
-            )
+            result = await self._call_llm(messages, max_tokens=2000, json_mode=(self.provider == "openai"))
 
-            # Parse JSON response
-            content = response.choices[0].message.content
-            finish_reason = response.choices[0].finish_reason
+            content = result["content"]
+            finish_reason = result["finish_reason"]
 
             if config.DEBUG:
                 logger.debug(f"[LLM] Response finish_reason: {finish_reason}")
@@ -169,18 +266,17 @@ class LLMClient:
                     "params": {},
                     "reasoning": "LLM returned empty response",
                     "goal_status": GoalStatus.BLOCKED,
-                    "tokens_used": response.usage.total_tokens if response.usage else 0,
+                    "tokens_used": result["tokens_used"],
                     "planning_time": time.perf_counter() - t0
                 }
 
             plan = self._parse_plan_response(content)
-            plan["tokens_used"] = response.usage.total_tokens
+            plan["tokens_used"] = result["tokens_used"]
             plan["planning_time"] = time.perf_counter() - t0
 
             return plan
 
         except Exception as e:
-            # Return a blocked status on error
             return {
                 "action": "none",
                 "params": {},
@@ -197,17 +293,7 @@ class LLMClient:
         memory_context: str,
         user_profile: Dict[str, Any]
     ) -> str:
-        """Build context string for planning prompt
-
-        Args:
-            goal: User's goal
-            page_context: Formatted page state
-            memory_context: Pre-formatted memory context string
-            user_profile: User data
-
-        Returns:
-            Formatted context string
-        """
+        """Build context string for planning prompt"""
         sections = [
             f"## Goal\n{goal}",
             "",
@@ -224,18 +310,10 @@ class LLMClient:
         return "\n".join(sections)
 
     def _parse_plan_response(self, content: str) -> Dict[str, Any]:
-        """Parse LLM planning response into structured action
-
-        Args:
-            content: JSON response from LLM
-
-        Returns:
-            Parsed action dictionary
-        """
+        """Parse LLM planning response into structured action"""
         try:
             plan = json.loads(content)
 
-            # Ensure required fields exist
             return {
                 "action": plan.get("action", "none"),
                 "params": plan.get("params", {}),
@@ -245,7 +323,6 @@ class LLMClient:
             }
 
         except json.JSONDecodeError:
-            # If JSON parsing fails, try to extract from text
             return {
                 "action": "none",
                 "params": {},
@@ -260,16 +337,7 @@ class LLMClient:
         user_profile: Dict[str, Any],
         error_context: Optional[str] = None
     ) -> List[Dict[str, str]]:
-        """Construct messages array for OpenAI API
-
-        Args:
-            form_html: Preprocessed form HTML
-            user_profile: User data
-            error_context: Previous error (if retrying)
-
-        Returns:
-            List of message dictionaries
-        """
+        """Construct messages array for LLM API"""
         messages = [
             {"role": "system", "content": self.system_prompt}
         ]
@@ -295,19 +363,7 @@ class LLMClient:
         return messages
 
     def _extract_code(self, response: str) -> str:
-        """Extract JavaScript code from response
-
-        Handles:
-        - Code blocks (```javascript ... ```)
-        - Raw code
-        - Explanatory text + code
-
-        Args:
-            response: LLM response text
-
-        Returns:
-            Extracted JavaScript code
-        """
+        """Extract JavaScript code from response"""
         # Try to extract from markdown code block
         code_block_match = re.search(
             r'```(?:javascript|js)?\s*\n(.*?)\n```',

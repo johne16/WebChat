@@ -42,7 +42,7 @@ router.post("/api/agent/start", async (req, res) => {
 // POST /api/agent/execute-goal - Proxy goal execution to agent
 router.post("/api/agent/execute-goal", async (req, res) => {
 	try {
-		const { port, goal, startUrl, userProfile, options, userId = 1 } = req.body;
+		const { port, goal, startUrl, userProfile, options, userId = 1, provider, model } = req.body;
 
 		if (!port || !goal) {
 			return res.status(400).json({ error: "Missing port or goal" });
@@ -66,6 +66,8 @@ router.post("/api/agent/execute-goal", async (req, res) => {
 			startUrl,
 			userProfile: mergedProfile,
 			sessionId: null,
+			provider,
+			model,
 			options: { ...options }
 		};
 
@@ -92,26 +94,6 @@ router.post("/api/agent/execute-goal", async (req, res) => {
 	}
 });
 
-// POST /api/agent/continue - Continue a paused agent session
-router.post("/api/agent/continue", async (req, res) => {
-	try {
-		const { port, sessionId, additionalData } = req.body;
-
-		if (!port || !sessionId) {
-			return res.status(400).json({ error: "Missing port or sessionId" });
-		}
-
-		console.log(`[Agent:${port}] Continuing session ${sessionId}`);
-
-		// Item 2: Use shared continue-session helper
-		const data = await forwardContinueSession(port, sessionId, additionalData);
-		console.log(`[Agent:${port}] Continue result:`, data.status);
-		res.json(data);
-	} catch (err) {
-		console.error("[Agent] Continue error:", err);
-		res.status(500).json({ error: String(err) });
-	}
-});
 
 // POST /api/agent/stop - Kill an agent process
 router.post("/api/agent/stop", async (req, res) => {
@@ -242,7 +224,7 @@ router.get("/api/agent/needs-input", (req, res) => {
 // POST /api/agent/provide-input - Provide input for a waiting agent
 router.post("/api/agent/provide-input", async (req, res) => {
 	try {
-		const { port, sessionId, inputData } = req.body;
+		const { port, sessionId, inputData, provider, model } = req.body;
 
 		if (!port || !sessionId) {
 			return res.status(400).json({ error: "Missing port or sessionId" });
@@ -253,7 +235,7 @@ router.post("/api/agent/provide-input", async (req, res) => {
 
 		// Item 2: Use shared continue-session helper
 		console.log(`[Agent:${port}] Providing input for session ${sessionId}`);
-		const data = await forwardContinueSession(port, sessionId, inputData);
+		const data = await forwardContinueSession(port, sessionId, inputData, provider, model);
 
 		// Only broadcast input-provided if agent doesn't need more input
 		if (data.status !== "needs_input") {

@@ -181,6 +181,9 @@ export async function startAgent(taskId) {
 export async function executeGoal(port, goal, startUrl, userProfile, options = {}) {
 	console.log('[AgentClient] Executing goal:', goal);
 
+	// Extract provider/model from options to send as top-level fields
+	const { provider, model, ...restOptions } = options;
+
 	const response = await fetch(`${SERVER_BASE}/api/agent/execute-goal`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
@@ -189,7 +192,9 @@ export async function executeGoal(port, goal, startUrl, userProfile, options = {
 			goal,
 			startUrl,
 			userProfile,
-			options: { headless: false, ...options }
+			provider,
+			model,
+			options: { headless: false, ...restOptions }
 		})
 	});
 
@@ -203,35 +208,6 @@ export async function executeGoal(port, goal, startUrl, userProfile, options = {
 	return data;
 }
 
-/**
- * Continue a paused agent session
- * @param {number} port - Agent container port
- * @param {string} sessionId - Session ID to continue
- * @param {Object} additionalData - Additional data (e.g., missing fields)
- * @returns {Promise<Object>} - Agent response
- */
-export async function continueSession(port, sessionId, additionalData = {}) {
-	console.log('[AgentClient] Continuing session:', sessionId);
-
-	const response = await fetch(`${SERVER_BASE}/api/agent/continue`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			port,
-			sessionId,
-			additionalData
-		})
-	});
-
-	if (!response.ok) {
-		const error = await safeResponseJson(response);
-		throw new Error(error.error || `Continue session failed: ${response.status}`);
-	}
-
-	const data = await response.json();
-	console.log('[AgentClient] Continue result:', data.status);
-	return data;
-}
 
 /**
  * Stop an agent process
@@ -273,19 +249,21 @@ export async function getAgentStatus() {
 }
 
 /**
- * Provide input data for a waiting agent (needs_input status)
+ * Provide input data for a waiting agent (needs_input or awaiting_user_action)
  * @param {number} port - Agent port
  * @param {string} sessionId - Session ID
  * @param {Object} inputData - Data to provide
+ * @param {string} provider - LLM provider for session resume
+ * @param {string} model - LLM model for session resume
  * @returns {Promise<Object>} - Agent response after continuing
  */
-export async function provideInput(port, sessionId, inputData) {
+export async function provideInput(port, sessionId, inputData, provider, model) {
 	console.log('[AgentClient] Providing input for session:', sessionId);
 
 	const response = await fetch(`${SERVER_BASE}/api/agent/provide-input`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ port, sessionId, inputData })
+		body: JSON.stringify({ port, sessionId, inputData, provider, model })
 	});
 
 	if (!response.ok) {

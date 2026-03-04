@@ -139,8 +139,10 @@ class ExecutionEngine:
         """Select a radio button by name and value"""
         await self.browser.page.evaluate(JS_SELECT_RADIO, {"name": name, "value": value})
 
-    async def _wait_for_element(self, selector: str, timeout: int = 5000) -> None:
+    async def _wait_for_element(self, selector: str, timeout: int = None) -> None:
         """Wait for an element to appear"""
+        if timeout is None:
+            timeout = config.EXECUTION_WAIT_TIMEOUT
         await self.browser.page.evaluate(JS_WAIT_FOR_ELEMENT, {"selector": selector, "timeout": timeout})
 
     # ========== Code Parsing ==========
@@ -200,7 +202,7 @@ class ExecutionEngine:
                 operations.append({
                     "type": "waitForElement",
                     "selector": match.group(1),
-                    "timeout": int(match.group(2)) if match.group(2) else 5000
+                    "timeout": int(match.group(2)) if match.group(2) else config.EXECUTION_WAIT_TIMEOUT
                 })
 
         return operations
@@ -231,8 +233,8 @@ class ExecutionEngine:
             return False, "Code must define 'async function fillForm()'"
 
         # Check length
-        if len(code) > 5000:
-            return False, "Generated code exceeds maximum length (5000 chars)"
+        if len(code) > config.MAX_CODE_LENGTH:
+            return False, f"Generated code exceeds maximum length ({config.MAX_CODE_LENGTH} chars)"
 
         # Extract function calls and verify they're allowed
         function_calls = self._FUNCTION_CALL_PATTERN.findall(code)

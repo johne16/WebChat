@@ -35,7 +35,9 @@ class AutonomousWebAgent:
         db_path: Optional[Path] = None,
         callback_url: Optional[str] = None,
         port: Optional[int] = None,
-        task_id: Optional[str] = None
+        task_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None
     ):
         """Initialize autonomous web agent
 
@@ -45,14 +47,22 @@ class AutonomousWebAgent:
             callback_url: URL to POST status updates (webhooks)
             port: Port this agent is running on (for webhook identification)
             task_id: Task ID (for webhook identification)
+            provider: LLM provider override ('openai' or 'anthropic')
+            model: LLM model override
         """
         self.browser = BrowserManager(
             headless=config.HEADLESS,
             timeout=config.BROWSER_TIMEOUT
         )
+
+        effective_provider = provider or config.PROVIDER
+        effective_model = model or config.OPENAI_MODEL
+        api_key = config.ANTHROPIC_API_KEY if effective_provider == "anthropic" else config.OPENAI_API_KEY
+
         self.llm = LLMClient(
-            api_key=config.OPENAI_API_KEY,
-            model=config.OPENAI_MODEL,
+            provider=effective_provider,
+            api_key=api_key,
+            model=effective_model,
             temperature=config.TEMPERATURE
         )
         self.memory = SessionMemory(session_id, db_path=db_path)
@@ -479,7 +489,7 @@ class AutonomousWebAgent:
                 "details": {"action": plan["action"], "step": step, **(result.error.get("details", {}) if result.error else {})}
             })
 
-            if consecutive_failures >= 3:
+            if consecutive_failures >= config.CONSECUTIVE_FAILURE_THRESHOLD:
                 self.memory.status = GoalStatus.FAILED
                 self.memory.save()
                 await self._send_webhook(GoalStatus.FAILED, "Too many consecutive failures")

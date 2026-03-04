@@ -7,7 +7,10 @@ let activeTabId = null;
 chrome.runtime.onInstalled.addListener(() => {
 	chrome.storage.local.set({
 		isTestingMode: false,
-		modelType: 'gpt-5',
+		provider: 'openai',
+		modelType: 'gpt-5.2',
+		agentProvider: 'openai',
+		agentModelType: 'gpt-5.2',
 		encryptedUserProfile: null  // Encrypted user profile for agent mode
 	});
 });
