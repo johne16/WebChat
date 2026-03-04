@@ -227,8 +227,22 @@ Profile data is encrypted with AES-256-GCM (PBKDF2, 100k iterations). Passphrase
 │   ├── prompts/               # LLM planning prompts
 │   ├── tests/                 # Unit and integration tests
 │   └── README.md              # Web agent documentation
+├── webchat.config.json        # Global configuration (providers, server, agent, extension)
 └── notes/                     # Planning and analysis notes
 ```
+
+## Configuration
+
+`webchat.config.json` in the project root is the centralized configuration file. It controls:
+
+| Section | Examples |
+|---------|----------|
+| `providers` | Default provider/model, intent model, available models per provider |
+| `server` | Port, body size limit, Crawl4AI URL, Brave Search settings, Anthropic max tokens |
+| `agent` | Port pool, timeout, health check settings, max steps, LLM temperature, browser options |
+| `extension` | ReAct loop limits, search rate limiting, crawl settings, profile defaults |
+
+`server/config.js` loads this file and exports the values for use across the server. The extension receives its config section via `GET /api/config`.
 
 ## Server Endpoints
 
@@ -242,7 +256,6 @@ Profile data is encrypted with AES-256-GCM (PBKDF2, 100k iterations). Passphrase
 | `/api/history/add` | POST | Manually add conversation turns to in-memory history |
 | `/api/agent/start` | POST | Spawn new agent process |
 | `/api/agent/execute-goal` | POST | Execute goal on agent |
-| `/api/agent/continue` | POST | Continue paused session |
 | `/api/agent/stop` | POST | Kill agent process |
 | `/api/agent/health/:port` | GET | Check agent health |
 | `/api/agent/status` | GET | List all running agents |
