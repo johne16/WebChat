@@ -7,6 +7,7 @@ const bannerMessage = document.getElementById('banner-message');
 const headerProgress = document.getElementById('header-progress');
 
 let currentInlineForm = null;
+let thinkingRow = null;
 
 /**
  * Add a chat message to the log
@@ -22,6 +23,33 @@ export function addMessage(role, text) {
 	row.appendChild(bubble);
 	log.appendChild(row);
 	log.scrollTop = log.scrollHeight;
+}
+
+/**
+ * Show the thinking indicator (bouncing dots) in the chat log
+ */
+export function showThinkingIndicator() {
+	if (thinkingRow) return;
+	thinkingRow = document.createElement('div');
+	thinkingRow.className = 'thinking-row';
+	thinkingRow.innerHTML = `
+		<div class="thinking-bubble">
+			<span class="dot"></span>
+			<span class="dot"></span>
+			<span class="dot"></span>
+		</div>`;
+	log.appendChild(thinkingRow);
+	log.scrollTop = log.scrollHeight;
+}
+
+/**
+ * Remove the thinking indicator from the chat log
+ */
+export function removeThinkingIndicator() {
+	if (thinkingRow && thinkingRow.parentNode) {
+		thinkingRow.parentNode.removeChild(thinkingRow);
+	}
+	thinkingRow = null;
 }
 
 /**

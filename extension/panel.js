@@ -21,6 +21,8 @@ import {
 import {
 	addMessage,
 	addMetaMessage,
+	showThinkingIndicator,
+	removeThinkingIndicator,
 	updateHeaderProgress,
 	renderInputForm,
 	removeCurrentForm,
@@ -271,8 +273,10 @@ function postMetrics(record) {
 
 async function handleSimpleIntent(text, currentUrl) {
 	const startTime = Date.now();
+	showThinkingIndicator();
 	try {
 		const botResponse = await sendToBot(text, currentUrl);
+		removeThinkingIndicator();
 		if (botResponse?.text) {
 			addMessage('bot', botResponse.text);
 		}
@@ -283,6 +287,7 @@ async function handleSimpleIntent(text, currentUrl) {
 			turnaroundMs: Date.now() - startTime
 		});
 	} catch (error) {
+		removeThinkingIndicator();
 		console.error('[Panel] Simple mode error:', error);
 		addMessage('bot', `Error: ${error.message}`);
 	}
@@ -291,6 +296,7 @@ async function handleSimpleIntent(text, currentUrl) {
 async function handleResearchIntent(text, currentUrl) {
 	const startTime = Date.now();
 	const actions = [];
+	showThinkingIndicator();
 	try {
 		updateHeaderProgress('Researching...');
 
@@ -300,6 +306,7 @@ async function handleResearchIntent(text, currentUrl) {
 			updateHeaderProgress(desc);
 		});
 
+		removeThinkingIndicator();
 		updateHeaderProgress('');
 		const answer = result.answer || 'I was unable to find an answer to your question.';
 		addMessage('bot', answer);
@@ -332,6 +339,7 @@ async function handleResearchIntent(text, currentUrl) {
 			console.error('[Panel] Failed to store research history:', histErr);
 		}
 	} catch (error) {
+		removeThinkingIndicator();
 		updateHeaderProgress('');
 		console.error('[Panel] Research mode error:', error);
 		addMessage('bot', `Error: ${error.message}`);

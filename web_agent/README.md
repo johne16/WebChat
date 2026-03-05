@@ -13,7 +13,6 @@ An autonomous web agent that uses GPT-5 to execute natural language goals on web
 - **Code Validation**: Security-focused validation prevents dangerous operations
 - **Performance Metrics**: JSONL metrics logging for per-session performance analysis
 - **REST API**: FastAPI server for easy integration as an LLM tool
-- **Docker Support**: Runs as standalone container for use by other LLMs
 
 ## Architecture
 
@@ -255,7 +254,6 @@ web_agent/
 │   └── sessions.db           # SQLite session storage
 ├── tests/                    # Unit and integration tests
 ├── logs/                     # Generated code and JSONL metrics ({sessionId}.jsonl)
-├── Dockerfile                # Container build
 ├── requirements.txt          # Python dependencies
 ├── .env                      # Environment variables
 └── README.md                 # This file
@@ -357,26 +355,6 @@ If steps 1-7 pass, components work in isolation. If step 8 passes, the whole sys
 | `test_integration.py` | Full agent flow against real pages (signup, signin) | Web_Test_Bed on port 5000 |
 | `test_integration.py::TestAPIIntegration` | API endpoint tests via HTTP | Web_Test_Bed on port 5000 AND agent on port 5001 |
 
-### Docker and Local Testing
-
-**Important:** For `TestAPIIntegration` tests, run the agent directly—not in Docker:
-
-```bash
-python -m src.agent_service
-```
-
-**Why?** Docker containers have their own network namespace. When the agent runs inside Docker and tries to navigate to `localhost:5000`, that `localhost` refers to the container itself—not your host machine where Web_Test_Bed is running. The container can't see services on the host's localhost.
-
-- **Host machine:** `localhost:5000` → Web_Test_Bed ✓
-- **Inside Docker:** `localhost:5000` → nothing (container is isolated) ✗
-
-**Workaround options:**
-1. Run the agent directly for local testing (recommended for development)
-2. Use `host.docker.internal` instead of `localhost` in startUrl when calling a Dockerized agent
-3. Run Docker with `--add-host=host.docker.internal:host-gateway` flag
-
-For production, this isn't an issue—target websites won't be on `localhost`.
-
 ### Useful Pytest Flags
 
 | Flag | Description |
@@ -430,28 +408,6 @@ Set `headless=false` in request options or `.env` to watch the browser work.
 
 - Console logs (when `DEBUG=true`)
 - Saved files in `logs/generated_code/` (when `SAVE_GENERATED_CODE=true`)
-
-## Docker
-
-Build and run as a standalone container (for use as an LLM tool):
-
-```bash
-# Build
-docker build -t web-agent .
-
-# Run with API key
-docker run -p 5001:5001 -e OPENAI_API_KEY=sk-xxx web-agent
-
-# Run with persistent session storage
-docker run -p 5001:5001 -e OPENAI_API_KEY=sk-xxx -v ./data:/app/data web-agent
-
-# Run with env file
-docker run -p 5001:5001 --env-file .env web-agent
-```
-
-Container defaults: `HEADLESS=true`, `DEBUG=false`, `PORT=5001`
-
-Another LLM can call `POST http://<container-host>:5001/api/execute-goal` as a tool.
 
 ## Troubleshooting
 
