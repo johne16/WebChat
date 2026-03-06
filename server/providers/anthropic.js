@@ -2,7 +2,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { appConfig } from "../config.js";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const anthropic = new Anthropic({
+	apiKey: process.env.ANTHROPIC_API_KEY,
+	maxRetries: appConfig.server.anthropic.maxRetries
+});
 
 /**
  * Send a chat completion request to Anthropic
@@ -35,14 +38,24 @@ export async function chat(model, messages) {
 		params.system = systemParts.join("\n");
 	}
 
-	const response = await anthropic.messages.create(params);
-	const content = response?.content?.[0]?.text || "";
-	// Normalize to OpenAI's token field names for consistent metrics
-	const raw = response?.usage;
-	const usage = raw ? {
-		prompt_tokens: raw.input_tokens,
-		completion_tokens: raw.output_tokens,
-		total_tokens: (raw.input_tokens || 0) + (raw.output_tokens || 0)
-	} : null;
-	return { content, usage };
+	try {
+		const response = await anthropic.messages.create(params);
+		const content = response?.content?.[0]?.text || "";
+		// Normalize to OpenAI's token field names for consistent metrics
+		const raw = response?.usage;
+		const usage = raw ? {
+			prompt_tokens: raw.input_tokens,
+			completion_tokens: raw.output_tokens,
+			total_tokens: (raw.input_tokens || 0) + (raw.output_tokens || 0)
+		} : null;
+		return { content, usage };
+	} catch (err) {
+		if (err instanceof Anthropic.APIError) {
+			const wrapped = new Error(err.message);
+			wrapped.status = err.status || 500;
+			wrapped.retryAfter = err.headers?.get?.('retry-after') || null;
+			throw wrapped;
+		}
+		throw err;
+	}
 }

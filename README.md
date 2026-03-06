@@ -240,7 +240,7 @@ Profile data is encrypted with AES-256-GCM (PBKDF2, 100k iterations). Passphrase
 | `providers` | Default provider/model, intent model, available models per provider |
 | `server` | Port, body size limit, Crawl4AI URL, Brave Search settings, Anthropic max tokens |
 | `agent` | Port pool, timeout, health check settings, max steps, LLM temperature, browser options |
-| `extension` | ReAct loop limits, search rate limiting, crawl settings, profile defaults |
+| `extension` | ReAct loop limits, search defaults, crawl settings, profile defaults |
 
 `server/config.js` loads this file and exports the values for use across the server. The extension receives its config section via `GET /api/config`.
 
@@ -250,7 +250,7 @@ Profile data is encrypted with AES-256-GCM (PBKDF2, 100k iterations). Passphrase
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/api/openai/chat` | POST | Proxy to LLM (OpenAI or Anthropic via `provider` field) |
+| `/api/llm/chat` | POST | Proxy to LLM (OpenAI or Anthropic via `provider` field) |
 | `/api/crawl` | POST | Proxy to Crawl4AI |
 | `/api/search` | POST | Proxy to Brave Search |
 | `/api/history/add` | POST | Manually add conversation turns to in-memory history |

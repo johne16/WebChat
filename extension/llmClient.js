@@ -38,7 +38,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
  * @returns {Promise<Object>} Parsed response data
  */
 async function callLLM(model, messages, errorLabel = 'LLM', { userId = 1, storeInHistory = false, provider, flow } = {}) {
-	const res = await fetch(`${SERVER_BASE}/api/openai/chat`, {
+	const res = await fetch(`${SERVER_BASE}/api/llm/chat`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ model, messages, userId, storeInHistory, provider: provider || cachedProvider, flow })

@@ -44,6 +44,20 @@ const STANDARD_FIELDS = [
 // Fields to mask in the site data display
 const SENSITIVE_FIELDS = ['password', 'secret', 'token', 'key', 'pin', 'cvv', 'ssn'];
 
+// Validate passphrase for create/change flows
+function validatePassphrase(passphrase, confirmPassphrase) {
+	if (!passphrase) {
+		return { valid: false, error: 'Please enter a passphrase' };
+	}
+	if (passphrase !== confirmPassphrase) {
+		return { valid: false, error: 'Passphrases do not match' };
+	}
+	if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
+		return { valid: false, error: `Passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters` };
+	}
+	return { valid: true, error: null };
+}
+
 // Initialize
 async function init() {
 	const { encryptedUserProfile } = await chrome.storage.local.get('encryptedUserProfile');
@@ -75,18 +89,9 @@ createForm.addEventListener('submit', async (e) => {
 	const passphrase = createPassphraseInput.value;
 	const confirmPassphrase = confirmPassphraseInput.value;
 
-	if (!passphrase) {
-		showMessage('Please enter a passphrase');
-		return;
-	}
-
-	if (passphrase !== confirmPassphrase) {
-		showMessage('Passphrases do not match');
-		return;
-	}
-
-	if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
-		showMessage(`Passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters`);
+	const result = validatePassphrase(passphrase, confirmPassphrase);
+	if (!result.valid) {
+		showMessage(result.error);
 		return;
 	}
 
@@ -381,18 +386,14 @@ changePassphraseForm.addEventListener('submit', async (e) => {
 	const newPassphrase = document.getElementById('newPassphrase').value;
 	const confirmPassphrase = document.getElementById('confirmPassphrase').value;
 
-	if (!oldPassphrase || !newPassphrase || !confirmPassphrase) {
+	if (!oldPassphrase) {
 		showMessage('Please fill in all passphrase fields.');
 		return;
 	}
 
-	if (newPassphrase !== confirmPassphrase) {
-		showMessage('New passphrases do not match.');
-		return;
-	}
-
-	if (newPassphrase.length < MIN_PASSPHRASE_LENGTH) {
-		showMessage(`New passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters.`);
+	const result = validatePassphrase(newPassphrase, confirmPassphrase);
+	if (!result.valid) {
+		showMessage(result.error);
 		return;
 	}
 
@@ -477,3 +478,5 @@ deleteProfileBtn.addEventListener('click', async () => {
 
 // Initialize on load
 init();
+
+export { isSensitiveField, validatePassphrase, SENSITIVE_FIELDS, STANDARD_FIELDS };

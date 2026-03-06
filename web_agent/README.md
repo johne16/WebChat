@@ -76,6 +76,15 @@ The server will start on `http://localhost:5001`
 
 Interactive API docs available at: `http://localhost:5001/docs`
 
+### Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/` | GET | API information |
+| `/health` | GET | Health check |
+| `/api/execute-goal` | POST | Execute a goal |
+| `/api/session/{id}/continue` | POST | Continue paused session |
+
 ### Execute a Goal
 
 **Endpoint:** `POST /api/execute-goal`
@@ -232,7 +241,7 @@ All configuration is managed via `.env` file and `src/config.py`:
 | `TEMPERATURE` | `0.1` | LLM temperature (deterministic) |
 | `MAX_AGENT_STEPS` | `20` | Max steps before giving up |
 | `MAX_RETRY_ATTEMPTS` | `1` | Max retries on error |
-| `SAVE_GENERATED_CODE` | `true` | Save generated JS to logs/ |
+| `SAVE_GENERATED_CODE` | `false` | Save generated JS to logs/ |
 
 ## Project Structure
 

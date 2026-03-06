@@ -15,7 +15,7 @@ const providers = {
 };
 
 // LLM chat endpoint (supports OpenAI and Anthropic via provider field)
-router.post("/api/openai/chat", async (req, res) => {
+router.post("/api/llm/chat", async (req, res) => {
 	try {
 		const { model, messages, provider = "openai", userId = 1, storeInHistory = false, flow } = req.body;
 		console.log("[LLM] Request received - provider:", provider, "model:", model, "messages:", messages?.length);
@@ -73,7 +73,13 @@ router.post("/api/openai/chat", async (req, res) => {
 		res.json({ content: result.content, usage: result.usage });
 	} catch (err) {
 		console.error("[LLM] Error:", err);
-		res.status(500).json({ error: String(err) });
+		const status = err.status && err.status >= 400 && err.status < 600 ? err.status : 500;
+		const response = { error: err.message || String(err) };
+		if (err.retryAfter) {
+			res.setHeader('Retry-After', err.retryAfter);
+			response.retryAfter = err.retryAfter;
+		}
+		res.status(status).json(response);
 	}
 });
 
@@ -141,27 +147,57 @@ router.post("/api/search", async (req, res) => {
 			return res.status(500).json({ error: "BRAVE_SEARCH_API_KEY not configured" });
 		}
 
-		// Call Brave Search API
+		// Call Brave Search API with retry for transient errors
 		const searchUrl = new URL(appConfig.server.braveSearch.url);
 		searchUrl.searchParams.set("q", query);
 		searchUrl.searchParams.set("count", count.toString());
 
-		// Item 6: Remove unnecessary .toString() — fetch accepts URL objects directly
-		const response = await fetch(searchUrl, {
-			method: "GET",
-			headers: {
-				"Accept": "application/json",
-				"X-Subscription-Token": braveApiKey
-			}
-		});
+		const maxRetries = appConfig.server.braveSearch.maxRetries;
+		let lastStatus;
 
-		if (!response.ok) {
-			throw new Error(`Brave Search API responded with ${response.status}`);
+		for (let attempt = 0; attempt <= maxRetries; attempt++) {
+			const response = await fetch(searchUrl, {
+				method: "GET",
+				headers: {
+					"Accept": "application/json",
+					"X-Subscription-Token": braveApiKey
+				}
+			});
+
+			lastStatus = response.status;
+			const retryable = attempt < maxRetries;
+			const backoffMs = 1000 * Math.pow(2, attempt);
+
+			if (response.status === 429) {
+				const body = await response.json().catch(() => ({}));
+				const code = body?.errors?.[0]?.code;
+				if (code === 'QUOTA_LIMITED') {
+					throw new Error('Brave Search monthly quota exhausted');
+				}
+				if (retryable) {
+					const resetHeader = response.headers.get('X-RateLimit-Reset') || '0';
+					const resetMs = parseInt(resetHeader.split(',')[0].trim()) * 1000 || 0;
+					await new Promise(r => setTimeout(r, Math.max(backoffMs, resetMs)));
+					continue;
+				}
+			}
+
+			if (response.status >= 500 && retryable) {
+				await new Promise(r => setTimeout(r, backoffMs));
+				continue;
+			}
+
+			if (!response.ok) {
+				throw new Error(`Brave Search API responded with ${response.status}`);
+			}
+
+			const data = await response.json();
+			console.log("[Search] Search successful, found", data?.web?.results?.length || 0, "results");
+			res.json(data);
+			return;
 		}
 
-		const data = await response.json();
-		console.log("[Search] Search successful, found", data?.web?.results?.length || 0, "results");
-		res.json(data);
+		throw new Error(`Brave Search API failed after retries (last status: ${lastStatus})`);
 	} catch (err) {
 		console.error("[Search] Error:", err);
 		res.status(500).json({ error: String(err) });
