@@ -237,12 +237,21 @@ Profile data is encrypted with AES-256-GCM (PBKDF2, 100k iterations). Passphrase
 
 | Section | Examples |
 |---------|----------|
-| `providers` | Default provider/model, intent model, available models per provider |
+| `providers` | Default provider/model, agent provider/model, intent model, available models per provider |
 | `server` | Port, body size limit, Crawl4AI URL, Brave Search settings, Anthropic max tokens |
 | `agent` | Port pool, timeout, health check settings, max steps, LLM temperature, browser options |
 | `extension` | ReAct loop limits, search defaults, crawl settings, profile defaults |
 
 `server/config.js` loads this file and exports the values for use across the server. The extension receives its config section via `GET /api/config`.
+
+**Changing default provider/model:** The chat and agent defaults each live in two places that must stay in sync:
+
+| Default | `webchat.config.json` | `extension/background.js` |
+|---------|----------------------|--------------------------|
+| Chat provider/model | `providers.default` / `providers.defaultModel` | `provider` / `modelType` |
+| Agent provider/model | `providers.defaultAgentProvider` / `providers.defaultAgentModel` | `agentProvider` / `agentModelType` |
+
+The `background.js` values are written to `chrome.storage.local` on fresh install. The config values serve as the runtime fallback when storage is empty. Update both when changing defaults.
 
 ## Server Endpoints
 
