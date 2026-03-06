@@ -142,6 +142,124 @@ async def test_execute_failure():
 
 
 @pytest.mark.asyncio
+async def test_execute_select_option():
+    """Test successful selectOption execution"""
+    browser = MagicMock()
+    browser.page.evaluate = AsyncMock()
+
+    engine = ExecutionEngine(browser)
+
+    code = """async function fillForm() {
+        await selectOption('#state', 'TX');
+    }"""
+
+    result = await engine.execute(code)
+
+    assert result["success"] is True
+    assert len(result["steps"]) == 1
+    assert result["steps"][0]["action"] == "selectOption"
+    assert result["steps"][0]["selector"] == "#state"
+    assert result["steps"][0]["value"] == "TX"
+
+
+@pytest.mark.asyncio
+async def test_execute_check_checkbox():
+    """Test successful checkCheckbox execution"""
+    browser = MagicMock()
+    browser.page.evaluate = AsyncMock()
+
+    engine = ExecutionEngine(browser)
+
+    code = """async function fillForm() {
+        await checkCheckbox('#terms', true);
+    }"""
+
+    result = await engine.execute(code)
+
+    assert result["success"] is True
+    assert len(result["steps"]) == 1
+    assert result["steps"][0]["action"] == "checkCheckbox"
+    assert result["steps"][0]["selector"] == "#terms"
+    assert result["steps"][0]["checked"] is True
+
+
+@pytest.mark.asyncio
+async def test_execute_check_checkbox_uncheck():
+    """Test checkCheckbox with false (uncheck)"""
+    browser = MagicMock()
+    browser.page.evaluate = AsyncMock()
+
+    engine = ExecutionEngine(browser)
+
+    code = """async function fillForm() {
+        await checkCheckbox('#newsletter', false);
+    }"""
+
+    result = await engine.execute(code)
+
+    assert result["success"] is True
+    assert result["steps"][0]["checked"] is False
+
+
+@pytest.mark.asyncio
+async def test_execute_wait_for_element():
+    """Test successful waitForElement execution"""
+    browser = MagicMock()
+    browser.page.evaluate = AsyncMock()
+
+    engine = ExecutionEngine(browser)
+
+    code = """async function fillForm() {
+        await waitForElement('#loading-done');
+    }"""
+
+    result = await engine.execute(code)
+
+    assert result["success"] is True
+    assert len(result["steps"]) == 1
+    assert result["steps"][0]["action"] == "waitForElement"
+    assert result["steps"][0]["selector"] == "#loading-done"
+
+
+@pytest.mark.asyncio
+async def test_execute_wait_for_element_with_timeout():
+    """Test waitForElement with custom timeout"""
+    browser = MagicMock()
+    browser.page.evaluate = AsyncMock()
+
+    engine = ExecutionEngine(browser)
+
+    code = """async function fillForm() {
+        await waitForElement('#spinner', 10000);
+    }"""
+
+    result = await engine.execute(code)
+
+    assert result["success"] is True
+    ops = engine._parse_operations(code)
+    assert ops[0]["timeout"] == 10000
+
+
+@pytest.mark.asyncio
+async def test_execute_wait_for_element_timeout_error():
+    """Test waitForElement when element never appears"""
+    browser = MagicMock()
+    browser.page.evaluate = AsyncMock(
+        side_effect=Exception("Timeout waiting for element: #never")
+    )
+
+    engine = ExecutionEngine(browser)
+
+    code = """async function fillForm() {
+        await waitForElement('#never');
+    }"""
+
+    result = await engine.execute(code)
+
+    assert result["success"] is False
+    assert "Timeout" in result["error"]["message"]
+
+@pytest.mark.asyncio
 async def test_execute_exception():
     """Test code execution with exception"""
     browser = MagicMock()

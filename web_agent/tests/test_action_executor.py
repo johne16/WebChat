@@ -14,7 +14,7 @@ def temp_db():
     """Use temporary database for tests"""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test_sessions.db"
-        with patch.object(SessionMemory, 'DB_PATH', db_path):
+        with patch.object(SessionMemory, 'DEFAULT_DB_PATH', db_path):
             yield db_path
 
 

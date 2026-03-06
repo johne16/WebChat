@@ -7,7 +7,7 @@ from httpx import AsyncClient, ASGITransport
 import tempfile
 from pathlib import Path
 
-from src.agent_service import app
+from src.agent_service import app, AppConfig
 from src.memory import SessionMemory
 
 
@@ -16,9 +16,15 @@ def temp_db():
     """Use temporary database for tests"""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test_sessions.db"
-        with patch.object(SessionMemory, 'DB_PATH', db_path):
+        with patch.object(SessionMemory, 'DEFAULT_DB_PATH', db_path):
             yield db_path
 
+
+@pytest.fixture(autouse=True)
+def set_app_config():
+    """Set default AppConfig on app.state for all tests"""
+    app.state.app_config = AppConfig()
+    yield
 
 @pytest.fixture
 def client():
@@ -36,7 +42,7 @@ class TestHealthEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "healthy"
-        assert data["version"] == "2.0.0"
+        assert data["service"] == "autonomous-web-agent"
 
     def test_root_endpoint(self, client):
         """Test GET / returns API info"""
@@ -44,7 +50,7 @@ class TestHealthEndpoints:
 
         assert response.status_code == 200
         data = response.json()
-        assert "version" in data
+        assert "message" in data
         assert data["endpoint"] == "POST /api/execute-goal"
 
 
@@ -143,7 +149,8 @@ class TestExecuteGoalEndpoint:
                 )
 
             assert response.status_code == 200
-            mock_agent_class.assert_called_with(session_id="existing-session")
+            call_kwargs = mock_agent_class.call_args.kwargs
+            assert call_kwargs["session_id"] == "existing-session"
 
     @pytest.mark.asyncio
     async def test_execute_goal_with_options(self, temp_db):
@@ -626,4 +633,5 @@ class TestContinueSessionEndpoint:
             assert response.status_code == 200
 
             # Verify agent was created with correct session_id
-            mock_agent_class.assert_called_with(session_id=session_id)
+            call_kwargs = mock_agent_class.call_args.kwargs
+            assert call_kwargs["session_id"] == session_id

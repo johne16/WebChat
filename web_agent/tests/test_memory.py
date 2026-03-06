@@ -15,7 +15,7 @@ def temp_db():
     """Use temporary database for tests"""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test_sessions.db"
-        with patch.object(SessionMemory, 'DB_PATH', db_path):
+        with patch.object(SessionMemory, 'DEFAULT_DB_PATH', db_path):
             yield db_path
 
 
@@ -272,6 +272,71 @@ class TestSessionMemory:
         memory2 = SessionMemory(session_id=memory.session_id)
 
         assert memory2.missing_fields == ["birthCity", "securityAnswer"]
+
+
+    def test_format_context_for_llm(self, temp_db):
+        """Test format_context_for_llm returns formatted string"""
+        memory = SessionMemory()
+        memory.remember("email", "test@example.com")
+        memory.add_visited_url("http://example.com")
+
+        action = ActionRecord(step=1, action_type="fill_form", params={}, success=True)
+        memory.add_action(action)
+
+        context = memory.format_context_for_llm()
+
+        assert "## Session Memory" in context
+        assert "test@example.com" in context
+        assert "http://example.com" in context
+        assert "Current Step: 1" in context
+        assert "[OK] Step 1: fill_form" in context
+
+    def test_format_context_for_llm_with_failed_action(self, temp_db):
+        """Test format_context_for_llm shows FAIL for failed actions"""
+        memory = SessionMemory()
+
+        action = ActionRecord(step=1, action_type="click_link", params={}, success=False)
+        memory.add_action(action)
+
+        context = memory.format_context_for_llm()
+
+        assert "[FAIL] Step 1: click_link" in context
+
+    def test_format_action_history(self, temp_db):
+        """Test format_action_history returns serializable list"""
+        memory = SessionMemory()
+
+        action1 = ActionRecord(step=1, action_type="fill_form", params={"submit": True}, success=True, result={"fields": 3})
+        action2 = ActionRecord(step=2, action_type="click_link", params={"link_text": "Next"}, success=False)
+        memory.add_action(action1)
+        memory.add_action(action2)
+
+        history = memory.format_action_history()
+
+        assert len(history) == 2
+        assert history[0]["step"] == 1
+        assert history[0]["action"] == "fill_form"
+        assert history[0]["params"] == {"submit": True}
+        assert history[0]["success"] is True
+        assert history[0]["result"] == {"fields": 3}
+        assert "timestamp" in history[0]
+        assert history[1]["step"] == 2
+        assert history[1]["success"] is False
+
+    def test_iter_action_history(self, temp_db):
+        """Test iter_action_history returns iterator over actions"""
+        memory = SessionMemory()
+
+        action1 = ActionRecord(step=1, action_type="fill_form", params={}, success=True)
+        action2 = ActionRecord(step=2, action_type="click_link", params={}, success=True)
+        memory.add_action(action1)
+        memory.add_action(action2)
+
+        actions = list(memory.iter_action_history())
+
+        assert len(actions) == 2
+        assert actions[0].step == 1
+        assert actions[1].step == 2
 
 
 class TestActionRecord:

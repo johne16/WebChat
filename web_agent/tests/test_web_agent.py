@@ -426,3 +426,145 @@ class TestAutonomousWebAgent:
         assert "actionHistory" in response
         assert "memory" in response
         assert "errors" in response
+
+    @pytest.mark.asyncio
+    async def test_send_webhook_no_callback(self, temp_db, mock_config):
+        """Test _send_webhook is a no-op when callback_url is None"""
+        agent = AutonomousWebAgent()
+        agent.callback_url = None
+
+        # Should not raise
+        await agent._send_webhook("started", "test message")
+
+    @pytest.mark.asyncio
+    async def test_send_webhook_sends_payload(self, temp_db, mock_config):
+        """Test _send_webhook sends correct payload"""
+        agent = AutonomousWebAgent()
+        agent.callback_url = "http://localhost:8787/api/agent/webhook"
+        agent.port = 5001
+        agent.task_id = "task-123"
+
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock()
+        agent._http_client = mock_client
+
+        await agent._send_webhook("step_completed", "Step 1 done", data={"step": 1})
+
+        mock_client.post.assert_called_once()
+        call_args = mock_client.post.call_args
+        payload = call_args.kwargs["json"]
+        assert payload["status"] == "step_completed"
+        assert payload["port"] == 5001
+        assert payload["taskId"] == "task-123"
+        assert payload["message"] == "Step 1 done"
+        assert payload["data"]["step"] == 1
+
+    @pytest.mark.asyncio
+    async def test_send_webhook_handles_error(self, temp_db, mock_config):
+        """Test _send_webhook does not raise on HTTP failure"""
+        agent = AutonomousWebAgent()
+        agent.callback_url = "http://localhost:8787/api/agent/webhook"
+
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(side_effect=Exception("Connection refused"))
+        agent._http_client = mock_client
+
+        # Should not raise
+        await agent._send_webhook("started", "test")
+
+    @pytest.mark.asyncio
+    async def test_execute_goal_needs_input(
+        self, temp_db, mock_config, mock_browser, mock_llm, mock_action_executor
+    ):
+        """Test goal execution returns needs_input when LLM reports missing fields"""
+        mock_llm.generate_plan = AsyncMock(return_value={
+            "action": "none",
+            "params": {},
+            "reasoning": "Missing birth city",
+            "goal_status": "needs_input",
+            "missing_fields": ["birthCity"],
+            "tokens_used": 100
+        })
+
+        agent = AutonomousWebAgent()
+        result = await agent.execute_goal(
+            goal="Sign up",
+            start_url="http://example.com/signup",
+            user_profile={"email": "test@example.com"}
+        )
+
+        assert result["success"] is True
+        assert result["goalAchieved"] is False
+        assert result["needsInput"] is True
+        assert "birthCity" in result["missingFields"]
+        assert result["message"] == "Missing birth city"
+
+    @pytest.mark.asyncio
+    async def test_execute_goal_needs_input_keeps_browser_open(
+        self, temp_db, mock_config, mock_browser, mock_llm, mock_action_executor
+    ):
+        """Test browser stays open for needs_input so agent can resume"""
+        mock_llm.generate_plan = AsyncMock(return_value={
+            "action": "none",
+            "params": {},
+            "reasoning": "Missing data",
+            "goal_status": "needs_input",
+            "missing_fields": ["securityAnswer"],
+            "tokens_used": 50
+        })
+
+        agent = AutonomousWebAgent()
+        await agent.execute_goal(
+            goal="Sign up",
+            start_url="http://example.com/signup",
+            user_profile={}
+        )
+
+        mock_browser.close.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_goal_awaiting_user_action(
+        self, temp_db, mock_config, mock_browser, mock_llm, mock_action_executor
+    ):
+        """Test goal execution returns awaiting_user_action for manual steps"""
+        mock_llm.generate_plan = AsyncMock(return_value={
+            "action": "none",
+            "params": {},
+            "reasoning": "CAPTCHA detected, user must solve it",
+            "goal_status": "awaiting_user_action",
+            "tokens_used": 100
+        })
+
+        agent = AutonomousWebAgent()
+        result = await agent.execute_goal(
+            goal="Sign up",
+            start_url="http://example.com/signup",
+            user_profile={}
+        )
+
+        assert result["success"] is True
+        assert result["goalAchieved"] is False
+        assert result["awaitingUserAction"] is True
+        assert "CAPTCHA" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_execute_goal_awaiting_user_action_keeps_browser_open(
+        self, temp_db, mock_config, mock_browser, mock_llm, mock_action_executor
+    ):
+        """Test browser stays open for awaiting_user_action"""
+        mock_llm.generate_plan = AsyncMock(return_value={
+            "action": "none",
+            "params": {},
+            "reasoning": "Manual action needed",
+            "goal_status": "awaiting_user_action",
+            "tokens_used": 50
+        })
+
+        agent = AutonomousWebAgent()
+        await agent.execute_goal(
+            goal="Sign up",
+            start_url="http://example.com/signup",
+            user_profile={}
+        )
+
+        mock_browser.close.assert_not_called()
