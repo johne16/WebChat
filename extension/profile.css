@@ -110,7 +110,7 @@ h2 {
 	outline-offset: 2px;
 }
 
-.unlock-form button {
+.unlock-form button[type="submit"] {
 	padding: 10px 20px;
 	border: none;
 	border-radius: 8px;
@@ -120,7 +120,7 @@ h2 {
 	cursor: pointer;
 }
 
-.unlock-form button:hover {
+.unlock-form button[type="submit"]:hover {
 	opacity: 0.9;
 }
 
@@ -419,6 +419,43 @@ h2 {
 #forgot-passphrase-link:hover {
 	color: var(--error);
 	text-decoration: underline;
+}
+
+/* Password eye toggle */
+.password-wrapper {
+	position: relative;
+	display: flex;
+}
+
+.password-wrapper input {
+	flex: 1;
+	padding-right: 36px;
+}
+
+.btn-eye-toggle {
+	position: absolute;
+	right: 8px;
+	top: 50%;
+	transform: translateY(-50%);
+	background: none;
+	border: none;
+	outline: none;
+	cursor: pointer;
+	color: var(--muted);
+	padding: 4px;
+	display: flex;
+	align-items: center;
+	-webkit-appearance: none;
+	appearance: none;
+}
+
+.btn-eye-toggle:hover {
+	color: var(--fg);
+}
+
+.unlock-form .password-wrapper {
+	flex: 1;
+	min-width: 200px;
 }
 
 /* Create passphrase section */

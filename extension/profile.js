@@ -4,6 +4,31 @@
 import { formatFieldLabel } from './ui.js';
 import { getConfig, loadConfig, SERVER_BASE } from './config.js';
 
+// Inline SVGs for eye toggle (no external deps)
+const SVG_EYE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+const SVG_EYE_OFF = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+// Wrap a password input with a show/hide toggle button
+function addEyeToggle(input) {
+	const wrapper = document.createElement('div');
+	wrapper.className = 'password-wrapper';
+	input.parentNode.insertBefore(wrapper, input);
+	wrapper.appendChild(input);
+
+	const toggle = document.createElement('button');
+	toggle.type = 'button';
+	toggle.className = 'btn-eye-toggle';
+	toggle.title = 'Show/hide';
+	toggle.innerHTML = SVG_EYE;
+	wrapper.appendChild(toggle);
+
+	const reveal = () => { input.type = 'text'; toggle.innerHTML = SVG_EYE_OFF; };
+	const hide = () => { input.type = 'password'; toggle.innerHTML = SVG_EYE; };
+	toggle.addEventListener('mousedown', reveal);
+	toggle.addEventListener('mouseup', hide);
+	toggle.addEventListener('mouseleave', hide);
+}
+
 // Load config from server (profile.html is a standalone page)
 await loadConfig();
 
@@ -24,6 +49,11 @@ const forgotLink = document.getElementById('forgot-passphrase-link');
 const createPassphraseSection = document.getElementById('create-passphrase-section');
 const createPassphraseForm = document.getElementById('create-passphrase-form');
 const skipPassphraseBtn = document.getElementById('skip-passphrase-btn');
+
+// Add eye toggles to static passphrase inputs
+addEyeToggle(document.getElementById('unlock-passphrase'));
+addEyeToggle(document.getElementById('new-passphrase'));
+addEyeToggle(document.getElementById('confirm-passphrase'));
 
 // State
 let currentProfile = null;
@@ -136,6 +166,7 @@ function renderDynamicFields(extraFields) {
 
 		formRow.appendChild(label);
 		formRow.appendChild(input);
+		if (isSensitiveField(key)) addEyeToggle(input);
 
 		const deleteBtn = el('button', 'btn-icon delete', '\uD83D\uDDD1\uFE0F');
 		deleteBtn.type = 'button';
