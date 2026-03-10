@@ -26,9 +26,9 @@ vi.mock('../searchClient.js', () => ({
 	searchBrave: mockSearchBrave
 }));
 
-const mockCrawlPage = vi.fn();
+const mockExtractPage = vi.fn();
 vi.mock('../utils.js', () => ({
-	crawlPage: mockCrawlPage
+	extractPage: mockExtractPage
 }));
 
 const { runReActLoop } = await import('../react.js');
@@ -36,8 +36,8 @@ const { runReActLoop } = await import('../react.js');
 describe('react.js - runReActLoop', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		// Default: crawlPage returns content for initial fetch
-		mockCrawlPage.mockResolvedValue('Page content that is long enough to not trigger short content warning for testing purposes and more text here');
+		// Default: extractPage returns content for initial fetch
+		mockExtractPage.mockResolvedValue('Page content that is long enough to not trigger short content warning for testing purposes and more text here');
 	});
 
 	it('completes a full think->act->observe->answer loop', async () => {
@@ -81,14 +81,14 @@ describe('react.js - runReActLoop', () => {
 	});
 
 	it('handles fetch_url action', async () => {
-		mockCrawlPage.mockResolvedValue('Long content that is definitely more than one hundred characters for the content length check to pass without triggering warnings');
+		mockExtractPage.mockResolvedValue('Long content that is definitely more than one hundred characters for the content length check to pass without triggering warnings');
 
 		mockAskLLMToThink
 			.mockResolvedValueOnce({ thought: 'fetch', action: 'fetch_url', action_input: 'https://other.com' })
 			.mockResolvedValueOnce({ thought: 'done', action: 'answer', action_input: 'Fetched' });
 
 		const result = await runReActLoop('q', 'https://example.com');
-		expect(mockCrawlPage).toHaveBeenCalledWith('https://other.com');
+		expect(mockExtractPage).toHaveBeenCalledWith('https://other.com');
 		expect(result.answer).toBe('Fetched');
 	});
 
@@ -127,8 +127,8 @@ describe('react.js - runReActLoop', () => {
 		// currentURL is already fetched at init, so fetch_url for same URL should be duplicate
 		const result = await runReActLoop('q', 'https://example.com');
 
-		// crawlPage called once for initial fetch, not again for the duplicate
-		expect(mockCrawlPage).toHaveBeenCalledTimes(1);
+		// extractPage called once for initial fetch, not again for the duplicate
+		expect(mockExtractPage).toHaveBeenCalledTimes(1);
 		expect(result.answer).toBe('Done');
 	});
 
@@ -162,7 +162,7 @@ describe('react.js - runReActLoop', () => {
 	});
 
 	it('handles null currentURL', async () => {
-		mockCrawlPage.mockResolvedValue('content');
+		mockExtractPage.mockResolvedValue('content');
 		mockAskLLMToThink.mockResolvedValueOnce({
 			thought: 'answer', action: 'answer', action_input: 'No page'
 		});
@@ -170,7 +170,7 @@ describe('react.js - runReActLoop', () => {
 		const result = await runReActLoop('q', null);
 
 		// Should not attempt initial fetch when currentURL is falsy
-		expect(mockCrawlPage).not.toHaveBeenCalled();
+		expect(mockExtractPage).not.toHaveBeenCalled();
 		expect(result.answer).toBe('No page');
 	});
 

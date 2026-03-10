@@ -15,7 +15,7 @@ vi.mock('../config.js', () => ({
 	}))
 }));
 
-const { extractDomain, parseJsonFromLLM, crawlPage } = await import('../utils.js');
+const { extractDomain, parseJsonFromLLM, extractPage } = await import('../utils.js');
 
 describe('extractDomain', () => {
 	it('extracts hostname from a valid URL', () => {
@@ -69,18 +69,18 @@ describe('parseJsonFromLLM', () => {
 	});
 });
 
-describe('crawlPage', () => {
+describe('extractPage', () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
 	});
 
-	it('sends correct request body to crawl endpoint', async () => {
+	it('sends correct request body to extract endpoint', async () => {
 		mockFetch({ results: [{ markdown: { raw_markdown: '# Hello' } }] });
 
-		const result = await crawlPage('https://example.com');
+		const result = await extractPage('https://example.com');
 
 		expect(globalThis.fetch).toHaveBeenCalledWith(
-			'http://localhost:8787/api/crawl',
+			'http://localhost:8787/api/extract',
 			expect.objectContaining({
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -96,12 +96,12 @@ describe('crawlPage', () => {
 
 	it('returns empty string when no markdown in response', async () => {
 		mockFetch({ results: [{}] });
-		const result = await crawlPage('https://example.com');
+		const result = await extractPage('https://example.com');
 		expect(result).toBe('');
 	});
 
 	it('throws on non-ok response', async () => {
 		mockFetch({}, { ok: false, status: 500 });
-		await expect(crawlPage('https://example.com')).rejects.toThrow('Crawl error 500');
+		await expect(extractPage('https://example.com')).rejects.toThrow('Extract error 500');
 	});
 });

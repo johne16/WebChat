@@ -158,6 +158,13 @@ export function initDatabase() {
 			FOREIGN KEY (user_id) REFERENCES users(id)
 		);
 
+		-- TLD cache (single-row store for IANA TLD list)
+		CREATE TABLE IF NOT EXISTS tld_cache (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			tlds TEXT NOT NULL,
+			fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
+
 		-- Ensure default user exists
 		INSERT OR IGNORE INTO users (id) VALUES (1);
 	`);
@@ -382,6 +389,26 @@ export function addLearnedContext(userId = 1, fact, source = null) {
 
 export function deleteLearnedContext(id, userId) {
 	db.prepare(`DELETE FROM learned_context WHERE id = ? AND user_id = ?`).run(id, userId);
+}
+
+// =============================================================================
+// TLD Cache Operations
+// =============================================================================
+
+export function getCachedTlds() {
+	const row = db.prepare('SELECT tlds FROM tld_cache WHERE id = 1').get();
+	if (!row) return null;
+	return JSON.parse(row.tlds);
+}
+
+export function setCachedTlds(tldArray) {
+	db.prepare(`
+		INSERT INTO tld_cache (id, tlds, fetched_at)
+		VALUES (1, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(id) DO UPDATE SET
+			tlds = excluded.tlds,
+			fetched_at = CURRENT_TIMESTAMP
+	`).run(JSON.stringify(tldArray));
 }
 
 // =============================================================================

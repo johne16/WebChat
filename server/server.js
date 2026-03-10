@@ -2,8 +2,8 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import { initDatabase } from "./database.js";
-import { SERVER_PORT, MAX_BODY_SIZE, DATABASE_ENCRYPTION_KEY } from "./config.js";
+import { initDatabase, getCachedTlds, setCachedTlds } from "./database.js";
+import { SERVER_PORT, MAX_BODY_SIZE, DATABASE_ENCRYPTION_KEY, setTldSet } from "./config.js";
 import { killAllAgents } from "./agentManager.js";
 import { closeAllSSEClients } from "./sseManager.js";
 import proxyRoutes from "./routes/proxy.js";
@@ -22,6 +22,29 @@ app.use(express.json({ limit: MAX_BODY_SIZE }));
 
 // Initialize database
 initDatabase();
+
+async function loadTlds() {
+	try {
+		const res = await fetch('https://data.iana.org/TLD/tlds-alpha-by-domain.txt');
+		if (!res.ok) throw new Error(`IANA responded with ${res.status}`);
+		const text = await res.text();
+		const tlds = text.split('\n')
+			.filter(line => line && !line.startsWith('#'))
+			.map(line => line.trim().toLowerCase());
+		setTldSet(new Set(tlds));
+		setCachedTlds(tlds);
+		console.log(`[TLD] Fetched ${tlds.length} TLDs from IANA`);
+	} catch (err) {
+		console.warn('[TLD] Fetch failed, loading from cache:', err.message);
+		const cached = getCachedTlds();
+		if (cached) {
+			setTldSet(new Set(cached));
+			console.log(`[TLD] Loaded ${cached.length} TLDs from cache`);
+		} else {
+			console.warn('[TLD] No cached TLDs available; bare domain detection disabled');
+		}
+	}
+}
 
 // Mount route modules
 app.use(proxyRoutes);
@@ -46,4 +69,7 @@ function gracefulShutdown(signal) {
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
-app.listen(SERVER_PORT, () => console.log(`Proxy running on http://localhost:${SERVER_PORT}`));
+// Fetch TLD list then start listening
+loadTlds().then(() => {
+	app.listen(SERVER_PORT, () => console.log(`Proxy running on http://localhost:${SERVER_PORT}`));
+});

@@ -4,12 +4,12 @@
 import { SERVER_BASE, getConfig } from './config.js';
 
 /**
- * Crawl a page via Crawl4AI and return raw markdown
- * @param {string} url - URL to crawl
+ * Extract page content via Crawl4AI and return raw markdown
+ * @param {string} url - URL to extract
  * @returns {Promise<string>} Raw markdown content
  */
-export async function crawlPage(url) {
-	const response = await fetch(`${SERVER_BASE}/api/crawl`, {
+export async function extractPage(url) {
+	const response = await fetch(`${SERVER_BASE}/api/extract`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({
@@ -23,7 +23,7 @@ export async function crawlPage(url) {
 	});
 
 	if (!response.ok) {
-		throw new Error(`Crawl error ${response.status}`);
+		throw new Error(`Extract error ${response.status}`);
 	}
 
 	const data = await response.json();

@@ -1,6 +1,6 @@
-// routes/proxy.js - LLM, Crawl4AI, and Brave Search proxy endpoints
+// routes/proxy.js - LLM, content extraction, and Brave Search proxy endpoints
 import { Router } from "express";
-import { appConfig, PROVIDER } from "../config.js";
+import { appConfig, PROVIDER, getTldSet } from "../config.js";
 import { getHistory, addMessage } from "../conversationHistory.js";
 import { chat as openaiChat } from "../providers/openai.js";
 import { chat as anthropicChat } from "../providers/anthropic.js";
@@ -101,11 +101,10 @@ router.post("/api/history/add", async (req, res) => {
 	}
 });
 
-// Crawl4AI endpoint
-router.post("/api/crawl", async (req, res) => {
+// Content extraction endpoint (proxies to Crawl4AI)
+router.post("/api/extract", async (req, res) => {
 	try {
-		// Item 8: Add [Crawl] log prefix
-		console.log("[Crawl] Received crawl request:", req.body);
+		console.log("[Extract] Received extract request:", req.body);
 		const { urls, crawler_config } = req.body;
 		if (!urls || !Array.isArray(urls)) {
 			return res.status(400).json({ error: "Missing or invalid urls array" });
@@ -120,17 +119,16 @@ router.post("/api/crawl", async (req, res) => {
 			})
 		});
 
-		console.log("[Crawl] Response status:", response.status);
+		console.log("[Extract] Response status:", response.status);
 		if (!response.ok) {
 			throw new Error(`Crawl4AI responded with ${response.status}`);
 		}
 
 		const data = await response.json();
-		console.log("[Crawl] Crawl successful");
+		console.log("[Extract] Extraction successful");
 		res.json(data);
 	} catch (err) {
-		// Item 12: Add console.error to crawl endpoint catch block
-		console.error("[Crawl] Error:", err);
+		console.error("[Extract] Error:", err);
 		res.status(500).json({ error: String(err) });
 	}
 });
@@ -220,7 +218,8 @@ router.get("/api/config", (req, res) => {
 	res.json({
 		providers: appConfig.providers,
 		extension: appConfig.extension,
-		agent: { maxSteps: appConfig.agent.maxSteps }
+		agent: { maxSteps: appConfig.agent.maxSteps },
+		tlds: Array.from(getTldSet())
 	});
 });
 

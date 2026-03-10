@@ -58,13 +58,29 @@ function isObviouslyNotAgentTask(text) {
 }
 
 /**
- * Check if message has explicit URL
+ * Check if message has explicit URL (with protocol) or bare domain
+ * Bare domains are validated against the IANA TLD list from config.
  * @param {string} text - User message
- * @returns {string|null} URL if found, null otherwise
+ * @returns {string|null} URL if found (with https:// prepended for bare domains), null otherwise
  */
 function extractUrl(text) {
-	const urlMatch = text.match(/https?:\/\/[^\s]+/);
-	return urlMatch ? urlMatch[0] : null;
+	// Explicit protocol match first
+	const protoMatch = text.match(/https?:\/\/[^\s]+/);
+	if (protoMatch) return protoMatch[0];
+
+	// Bare domain fallback: word chars/hyphens + dot + TLD, optional path
+	const bareMatch = text.match(/(?:^|\s)([\w-]+(?:\.[\w-]+)*\.([\w]+)(?:\/[^\s]*)?)(?:\s|$)/);
+	if (!bareMatch) return null;
+
+	const candidate = bareMatch[1];
+	const tld = bareMatch[2].toLowerCase();
+	const tlds = getConfig()?.tlds;
+	if (!tlds || tlds.length === 0) return null;
+
+	// Validate TLD against IANA list (stored lowercase)
+	if (!tlds.includes(tld)) return null;
+
+	return `https://${candidate}`;
 }
 
 /**

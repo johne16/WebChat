@@ -218,9 +218,9 @@ describe("routes/proxy", () => {
 		});
 	});
 
-	describe("POST /api/crawl", () => {
+	describe("POST /api/extract", () => {
 		it("returns 400 if urls is missing or not an array", async () => {
-			const handler = getHandler("POST", "/api/crawl");
+			const handler = getHandler("POST", "/api/extract");
 			const req = mockReq({ body: {} });
 			const res = mockRes();
 
@@ -230,11 +230,11 @@ describe("routes/proxy", () => {
 		});
 
 		it("proxies request to Crawl4AI and returns response", async () => {
-			const handler = getHandler("POST", "/api/crawl");
-			const crawlResult = { results: [{ markdown: "hello" }] };
+			const handler = getHandler("POST", "/api/extract");
+			const extractResult = { results: [{ markdown: "hello" }] };
 			globalThis.fetch.mockResolvedValueOnce({
 				ok: true,
-				json: () => Promise.resolve(crawlResult)
+				json: () => Promise.resolve(extractResult)
 			});
 
 			const req = mockReq({ body: { urls: ["http://example.com"], crawler_config: {} } });
@@ -249,11 +249,11 @@ describe("routes/proxy", () => {
 					body: expect.any(String)
 				})
 			);
-			expect(res.json).toHaveBeenCalledWith(crawlResult);
+			expect(res.json).toHaveBeenCalledWith(extractResult);
 		});
 
 		it("returns 500 when Crawl4AI responds with error", async () => {
-			const handler = getHandler("POST", "/api/crawl");
+			const handler = getHandler("POST", "/api/extract");
 			globalThis.fetch.mockResolvedValueOnce({ ok: false, status: 503 });
 
 			const req = mockReq({ body: { urls: ["http://x.com"] } });

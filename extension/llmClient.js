@@ -1,7 +1,7 @@
 // extension/llmClient.js
 
 import { SERVER_BASE, getConfig } from './config.js';
-import { crawlPage, parseJsonFromLLM } from './utils.js';
+import { extractPage, parseJsonFromLLM } from './utils.js';
 
 // Cache modelType and provider at module level (item 4)
 // Defaults come from config pipeline via getConfig()
@@ -71,7 +71,7 @@ function buildContextPrompt(context) {
 					prompt += `     URL: ${result.url}\n`;
 					prompt += `     ${result.description}\n\n`;
 				});
-			} else if (obs.type === 'crawled_content') {
+			} else if (obs.type === 'extracted_content') {
 				prompt += `Source: ${obs.source}\n`;
 				if (obs.warning) {
 					prompt += `Warning: ${obs.warning}\n`;
@@ -97,10 +97,10 @@ export async function sendToBot(userText, currentURL) {
 	const model = cachedModel;
 	console.log('[llmClient] Using model:', model);
 
-	// Scrape current page via shared crawlPage
-	console.log('[llmClient] Starting crawl request...');
-	const pageContent = await crawlPage(currentURL);
-	console.log('[llmClient] Crawl successful, content length:', pageContent.length);
+	// Extract current page via shared extractPage
+	console.log('[llmClient] Starting extract request...');
+	const pageContent = await extractPage(currentURL);
+	console.log('[llmClient] Extract successful, content length:', pageContent.length);
 
 	// Send to LLM with page content
 	console.log('[llmClient] Sending to LLM API...');

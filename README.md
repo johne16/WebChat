@@ -106,7 +106,7 @@ WebChat uses **automatic intent detection** to route your message to the right h
 **Unified Flow:**
 1. User sends message via panel
 2. Intent detection (heuristic + LLM) classifies the request:
-   - **Simple**: Questions about current page → crawl page, send to LLM
+   - **Simple**: Questions about current page → extract page, send to LLM
    - **Research**: Questions needing web search → ReAct loop with Brave Search
    - **Agent**: Action requests (sign up, fill forms) → spawn agent with confirmation
 3. Response displayed (agent tasks show real-time status via SSE)
@@ -202,7 +202,7 @@ Profile data is encrypted at rest with AES-256-GCM using the server's `DATABASE_
 │   ├── searchClient.js        # Brave Search client
 │   ├── test-progress.html     # Progress indicator test page
 │   ├── ui.js                  # UI rendering (messages, forms, banners, header progress)
-│   └── utils.js               # Shared utilities (crawlPage, parseJsonFromLLM)
+│   └── utils.js               # Shared utilities (extractPage, parseJsonFromLLM)
 ├── server/
 │   ├── .env                   # API keys, config
 │   ├── agentManager.js        # Agent process lifecycle (spawn, kill, health check)
@@ -239,7 +239,7 @@ Profile data is encrypted at rest with AES-256-GCM using the server's `DATABASE_
 | `providers` | Default provider/model, agent provider/model, intent model, available models per provider |
 | `server` | Port, body size limit, Crawl4AI URL, Brave Search settings, Anthropic max tokens |
 | `agent` | Port pool, timeout, health check settings, max steps, LLM temperature, browser options |
-| `extension` | ReAct loop limits, search defaults, crawl settings, profile defaults |
+| `extension` | ReAct loop limits, search defaults, extraction settings, profile defaults |
 
 `server/config.js` loads this file and exports the values for use across the server. The extension receives its config section via `GET /api/config`.
 
@@ -259,7 +259,7 @@ The `background.js` values are written to `chrome.storage.local` on fresh instal
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/api/llm/chat` | POST | Proxy to LLM (OpenAI or Anthropic via `provider` field) |
-| `/api/crawl` | POST | Proxy to Crawl4AI |
+| `/api/extract` | POST | Proxy to Crawl4AI |
 | `/api/search` | POST | Proxy to Brave Search |
 | `/api/history/add` | POST | Manually add conversation turns to in-memory history |
 | `/api/agent/start` | POST | Spawn new agent process |

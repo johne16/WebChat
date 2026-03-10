@@ -2,7 +2,7 @@
 
 import { askLLMToThink, askLLMToAnswer } from './llmClient.js';
 import { searchBrave } from './searchClient.js';
-import { crawlPage } from './utils.js';
+import { extractPage } from './utils.js';
 import { getConfig } from './config.js';
 
 // Bailout config read at call time (not module init) so loadConfig() has completed.
@@ -120,7 +120,7 @@ export async function runReActLoop(userQuery, currentURL, onStep = null) {
 			const unhelpfulCount = recentObs.filter(obs =>
 				obs.type === 'error' ||
 				obs.type === 'duplicate_fetch' ||
-				(obs.type === 'crawled_content' && (!obs.content || obs.content.length < rc.minUsefulContentLength))
+				(obs.type === 'extracted_content' && (!obs.content || obs.content.length < rc.minUsefulContentLength))
 			).length;
 
 			if (unhelpfulCount >= rc.unhelpfulThreshold) {
@@ -177,9 +177,9 @@ async function executeSearch(query, currentURL = null) {
 }
 
 
-// Execute fetch of a specific URL via shared crawlPage
+// Execute fetch of a specific URL via shared extractPage
 async function executeFetchURL(url) {
-	const content = await crawlPage(url);
+	const content = await extractPage(url);
 
 	if (!content) {
 		throw new Error('No content extracted from URL');
@@ -189,7 +189,7 @@ async function executeFetchURL(url) {
 	const isLikelyUnhelpful = content.length < (getReactConfig().minUsefulContentLength);
 
 	return {
-		type: 'crawled_content',
+		type: 'extracted_content',
 		source: url,
 		content: content,
 		success: true,

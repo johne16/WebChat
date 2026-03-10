@@ -9,7 +9,7 @@ vi.mock('../config.js', () => ({
 }));
 
 vi.mock('../utils.js', () => ({
-	crawlPage: vi.fn(() => Promise.resolve('# Page Content\nSome text here')),
+	extractPage: vi.fn(() => Promise.resolve('# Page Content\nSome text here')),
 	parseJsonFromLLM: vi.fn((text) => JSON.parse(text))
 }));
 
@@ -21,14 +21,14 @@ describe('llmClient.js', () => {
 	});
 
 	describe('sendToBot', () => {
-		it('crawls page and sends content to LLM', async () => {
-			const { crawlPage } = await import('../utils.js');
-			crawlPage.mockResolvedValue('# Crawled Content');
+		it('extracts page and sends content to LLM', async () => {
+			const { extractPage } = await import('../utils.js');
+			extractPage.mockResolvedValue('# Extracted Content');
 			mockFetch({ content: 'LLM response text' });
 
 			const result = await sendToBot('What is this?', 'https://example.com');
 
-			expect(crawlPage).toHaveBeenCalledWith('https://example.com');
+			expect(extractPage).toHaveBeenCalledWith('https://example.com');
 			expect(globalThis.fetch).toHaveBeenCalledWith(
 				'http://localhost:8787/api/llm/chat',
 				expect.objectContaining({ method: 'POST' })
@@ -37,14 +37,14 @@ describe('llmClient.js', () => {
 			const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
 			expect(body.messages).toHaveLength(2);
 			expect(body.messages[1].content).toContain('What is this?');
-			expect(body.messages[1].content).toContain('# Crawled Content');
+			expect(body.messages[1].content).toContain('# Extracted Content');
 			expect(body.storeInHistory).toBe(true);
 			expect(result).toEqual({ text: 'LLM response text' });
 		});
 
 		it('throws on LLM API error', async () => {
-			const { crawlPage } = await import('../utils.js');
-			crawlPage.mockResolvedValue('content');
+			const { extractPage } = await import('../utils.js');
+			extractPage.mockResolvedValue('content');
 			mockFetch({}, { ok: false, status: 500 });
 
 			await expect(sendToBot('test', 'https://example.com')).rejects.toThrow('LLM error 500');

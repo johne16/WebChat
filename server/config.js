@@ -18,6 +18,11 @@ export const SERVER_PORT = process.env.PORT || appConfig.server.port;
 
 export const DATABASE_ENCRYPTION_KEY = process.env.DATABASE_ENCRYPTION_KEY;
 
+// TLD state (populated by server.js at startup, read by proxy.js config endpoint)
+let _tldSet = new Set();
+export function getTldSet() { return _tldSet; }
+export function setTldSet(set) { _tldSet = set; }
+
 export const AGENT_CONFIG = {
 	portPool: appConfig.agent.portPool,
 	agentPath: process.env.WEB_AGENT_PATH || path.resolve(__dirname, "..", "web_agent"),
