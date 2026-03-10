@@ -12,7 +12,10 @@ import {
 	getLearnedContext,
 	addLearnedContext,
 	deleteLearnedContext,
-	getFullUserData
+	getFullUserData,
+	hasPassphrase,
+	setPassphrase,
+	verifyPassphrase
 } from "../database.js";
 
 const router = Router();
@@ -33,6 +36,30 @@ function withErrorHandler(label, handler) {
 		}
 	};
 }
+
+// GET /api/db/passphrase/exists - Check if passphrase is set
+router.get("/api/db/passphrase/exists", withErrorHandler("Check passphrase", (req, res) => {
+	const userId = getUserId(req);
+	res.json({ exists: hasPassphrase(userId) });
+}));
+
+// POST /api/db/passphrase/set - Set passphrase
+router.post("/api/db/passphrase/set", withErrorHandler("Set passphrase", (req, res) => {
+	const { passphrase } = req.body;
+	if (!passphrase) return res.status(400).json({ error: "Missing passphrase" });
+	const userId = getUserId(req);
+	setPassphrase(userId, passphrase);
+	res.json({ success: true });
+}));
+
+// POST /api/db/passphrase/verify - Verify passphrase
+router.post("/api/db/passphrase/verify", withErrorHandler("Verify passphrase", (req, res) => {
+	const { passphrase } = req.body;
+	if (!passphrase) return res.status(400).json({ error: "Missing passphrase" });
+	const userId = getUserId(req);
+	const valid = verifyPassphrase(userId, passphrase);
+	res.json({ valid });
+}));
 
 // GET /api/db/profile - Get user profile
 router.get("/api/db/profile", withErrorHandler("Get profile", (req, res) => {

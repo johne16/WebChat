@@ -396,16 +396,11 @@ async function executeAgentTask(goal, url) {
 		}
 
 		const label = agentLabel(getAgentSession().port);
+		addMessage('bot', `${label}: Starting task`);
 		updateHeaderProgress(`${label}: Working...`);
 		const result = await executeAgentGoal(goal, url);
 
-		// Handle immediate response (non-SSE path for backwards compatibility)
-		if (result.status === 'achieved' || result.goalAchieved) {
-			addMessage('bot', result.message || 'Goal completed successfully');
-		} else if (result.status === 'failed' || result.status === 'blocked') {
-			addMessage('bot', result.message || 'Task could not be completed.');
-		}
-		// needs_input and awaiting_user_action will come via SSE
+		// Terminal statuses (achieved/failed/blocked) are handled via SSE in handleAgentStatusEvent
 
 	} catch (error) {
 		updateHeaderProgress('');

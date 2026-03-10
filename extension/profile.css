@@ -404,3 +404,24 @@ h2 {
 .field-value.masked {
 	color: var(--muted);
 }
+
+/* Lock section */
+#lock-section {
+	max-width: 400px;
+}
+
+#forgot-passphrase-link {
+	color: var(--muted);
+	font-size: 12px;
+	text-decoration: none;
+}
+
+#forgot-passphrase-link:hover {
+	color: var(--error);
+	text-decoration: underline;
+}
+
+/* Create passphrase section */
+#create-passphrase-section {
+	max-width: 400px;
+}

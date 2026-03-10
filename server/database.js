@@ -169,6 +169,13 @@ export function initDatabase() {
 		INSERT OR IGNORE INTO users (id) VALUES (1);
 	`);
 
+	// Migration: add passphrase_hash column to users table
+	try {
+		db.exec('ALTER TABLE users ADD COLUMN passphrase_hash TEXT');
+	} catch (_) {
+		// Column already exists
+	}
+
 	// Migrate plaintext data to encrypted if needed
 	migrateToEncrypted();
 
@@ -372,6 +379,9 @@ export function upsertSiteData(userId = 1, domain, fieldName, fieldValue) {
 
 export function deleteProfile(userId = 1) {
 	db.prepare('DELETE FROM profile WHERE user_id = ?').run(userId);
+	db.prepare('DELETE FROM site_data WHERE user_id = ?').run(userId);
+	db.prepare('DELETE FROM learned_context WHERE user_id = ?').run(userId);
+	db.prepare('UPDATE users SET passphrase_hash = NULL WHERE id = ?').run(userId);
 }
 
 export function deleteSiteData(userId = 1, domain, fieldName = null) {
@@ -433,6 +443,29 @@ export function setCachedTlds(tldArray) {
 			tlds = excluded.tlds,
 			fetched_at = CURRENT_TIMESTAMP
 	`).run(JSON.stringify(tldArray));
+}
+
+// =============================================================================
+// Passphrase Operations
+// =============================================================================
+
+export function hasPassphrase(userId = 1) {
+	const row = db.prepare('SELECT passphrase_hash FROM users WHERE id = ?').get(userId);
+	return !!(row && row.passphrase_hash);
+}
+
+export function setPassphrase(userId = 1, passphrase) {
+	const salt = crypto.randomBytes(32).toString('hex');
+	const hash = crypto.scryptSync(passphrase, salt, 64).toString('hex');
+	db.prepare('UPDATE users SET passphrase_hash = ? WHERE id = ?').run(`${salt}:${hash}`, userId);
+}
+
+export function verifyPassphrase(userId = 1, passphrase) {
+	const row = db.prepare('SELECT passphrase_hash FROM users WHERE id = ?').get(userId);
+	if (!row || !row.passphrase_hash) return false;
+	const [salt, storedHash] = row.passphrase_hash.split(':');
+	const hash = crypto.scryptSync(passphrase, salt, 64).toString('hex');
+	return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(storedHash, 'hex'));
 }
 
 // =============================================================================

@@ -18,9 +18,16 @@ const dangerSection = document.getElementById('danger-section');
 const profileForm = document.getElementById('profile-form');
 const deleteProfileBtn = document.getElementById('delete-profile-btn');
 const dynamicFieldsContainer = document.getElementById('dynamic-fields');
+const lockSection = document.getElementById('lock-section');
+const unlockForm = document.getElementById('unlock-form');
+const forgotLink = document.getElementById('forgot-passphrase-link');
+const createPassphraseSection = document.getElementById('create-passphrase-section');
+const createPassphraseForm = document.getElementById('create-passphrase-form');
+const skipPassphraseBtn = document.getElementById('skip-passphrase-btn');
 
 // State
 let currentProfile = null;
+let passphraseExists = false;
 
 // Profile field names (standard fields in DB use snake_case)
 const STANDARD_FIELDS = [
@@ -40,28 +47,41 @@ function showMessage(text, type = 'error') {
 	}, 5000);
 }
 
-// Initialize: load profile from server
+// Initialize: check passphrase gate, then load profile
 async function init() {
 	try {
-		const res = await fetch(`${SERVER_BASE}/api/db/profile?userId=${USER_ID}`);
-		if (!res.ok) throw new Error('Failed to load profile');
-		const data = await res.json();
-		currentProfile = data.profile || {};
+		const ppRes = await fetch(`${SERVER_BASE}/api/db/passphrase/exists`);
+		if (!ppRes.ok) throw new Error('Failed to check passphrase');
+		const ppData = await ppRes.json();
+		passphraseExists = ppData.exists;
 
-		// Show all sections immediately (no unlock needed)
-		profileSection.hidden = false;
-		siteDataSection.hidden = false;
-		dangerSection.hidden = false;
+		if (passphraseExists && sessionStorage.getItem('profileUnlocked') !== 'true') {
+			// Show lock screen
+			lockSection.hidden = false;
+			return;
+		}
 
-		populateForm(currentProfile);
-		await loadSiteData();
+		await loadProfile();
 	} catch (error) {
 		console.error('Init error:', error);
 		showMessage('Failed to connect to server. Is it running?');
-		// Still show form for new profile
 		profileSection.hidden = false;
 		dangerSection.hidden = false;
 	}
+}
+
+async function loadProfile() {
+	const res = await fetch(`${SERVER_BASE}/api/db/profile?userId=${USER_ID}`);
+	if (!res.ok) throw new Error('Failed to load profile');
+	const data = await res.json();
+	currentProfile = data.profile || {};
+
+	profileSection.hidden = false;
+	siteDataSection.hidden = false;
+	dangerSection.hidden = false;
+
+	populateForm(currentProfile);
+	await loadSiteData();
 }
 
 function formatPhoneDisplay(digits) {
@@ -328,6 +348,12 @@ profileForm.addEventListener('submit', async (e) => {
 		const data = await res.json();
 		currentProfile = data.profile;
 		showMessage('Profile saved successfully!', 'success');
+
+		// Prompt to create passphrase after first save if none exists
+		if (!passphraseExists) {
+			createPassphraseSection.hidden = false;
+			createPassphraseSection.scrollIntoView({ behavior: 'smooth' });
+		}
 	} catch (error) {
 		console.error('Save error:', error);
 		showMessage('Failed to save profile. Is the server running?');
@@ -352,6 +378,8 @@ deleteProfileBtn.addEventListener('click', async () => {
 		await fetch(`${SERVER_BASE}/api/db/profile?userId=${USER_ID}`, { method: 'DELETE' });
 
 		currentProfile = {};
+		passphraseExists = false;
+		sessionStorage.removeItem('profileUnlocked');
 		profileForm.reset();
 		dynamicFieldsContainer.innerHTML = '';
 		siteDataContainer.innerHTML = '<p class="empty-state">No site data saved yet.</p>';
@@ -361,6 +389,88 @@ deleteProfileBtn.addEventListener('click', async () => {
 		console.error('Delete profile error:', error);
 		showMessage('Failed to delete profile.');
 	}
+});
+
+// Unlock form handler
+unlockForm.addEventListener('submit', async (e) => {
+	e.preventDefault();
+	const passphrase = document.getElementById('unlock-passphrase').value;
+	try {
+		const res = await fetch(`${SERVER_BASE}/api/db/passphrase/verify`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ passphrase })
+		});
+		const data = await res.json();
+		if (data.valid) {
+			sessionStorage.setItem('profileUnlocked', 'true');
+			lockSection.hidden = true;
+			await loadProfile();
+		} else {
+			showMessage('Incorrect passphrase.');
+		}
+	} catch (error) {
+		console.error('Unlock error:', error);
+		showMessage('Failed to verify passphrase.');
+	}
+});
+
+// Forgot passphrase: wipe profile after double confirmation
+forgotLink.addEventListener('click', async (e) => {
+	e.preventDefault();
+	const confirmed = confirm(
+		'Forgot your passphrase?\n\n' +
+		'This will permanently delete all profile data (personal info, site data) to reset access. This cannot be undone.'
+	);
+	if (!confirmed) return;
+
+	const doubleConfirm = confirm(
+		'This is your last chance to cancel.\n\n' +
+		'Click OK to permanently delete all profile data and reset the passphrase.'
+	);
+	if (!doubleConfirm) return;
+
+	try {
+		await fetch(`${SERVER_BASE}/api/db/profile?userId=${USER_ID}`, { method: 'DELETE' });
+		sessionStorage.removeItem('profileUnlocked');
+		location.reload();
+	} catch (error) {
+		console.error('Reset error:', error);
+		showMessage('Failed to reset profile.');
+	}
+});
+
+// Create passphrase form handler
+createPassphraseForm.addEventListener('submit', async (e) => {
+	e.preventDefault();
+	const passphrase = document.getElementById('new-passphrase').value;
+	const confirmValue = document.getElementById('confirm-passphrase').value;
+
+	if (passphrase !== confirmValue) {
+		showMessage('Passphrases do not match.');
+		return;
+	}
+
+	try {
+		const res = await fetch(`${SERVER_BASE}/api/db/passphrase/set`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ passphrase })
+		});
+		if (!res.ok) throw new Error('Failed to set passphrase');
+		sessionStorage.setItem('profileUnlocked', 'true');
+		passphraseExists = true;
+		createPassphraseSection.hidden = true;
+		showMessage('Passphrase set.', 'success');
+	} catch (error) {
+		console.error('Set passphrase error:', error);
+		showMessage('Failed to set passphrase.');
+	}
+});
+
+// Skip passphrase creation
+skipPassphraseBtn.addEventListener('click', () => {
+	createPassphraseSection.hidden = true;
 });
 
 // Initialize on load
