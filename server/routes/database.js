@@ -5,6 +5,7 @@ import {
 	upsertProfile,
 	deleteProfile,
 	updateProfileExtraField,
+	deleteProfileExtraField,
 	getSiteData,
 	upsertSiteData,
 	deleteSiteData,
@@ -62,6 +63,17 @@ router.post("/api/db/profile/extra", withErrorHandler("Update extra field", (req
 	}
 	const userId = getUserId(req);
 	const profile = updateProfileExtraField(userId, fieldName, fieldValue);
+	res.json({ profile });
+}));
+
+// DELETE /api/db/profile/extra - Delete a single extra field
+router.delete("/api/db/profile/extra", withErrorHandler("Delete extra field", (req, res) => {
+	const { fieldName } = req.body;
+	if (!fieldName) {
+		return res.status(400).json({ error: "Missing fieldName" });
+	}
+	const userId = getUserId(req);
+	const profile = deleteProfileExtraField(userId, fieldName);
 	res.json({ profile });
 }));
 

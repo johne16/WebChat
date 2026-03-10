@@ -64,12 +64,19 @@ async function init() {
 	}
 }
 
+function formatPhoneDisplay(digits) {
+	if (!digits) return '';
+	if (digits.length === 10) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+	if (digits.length === 11 && digits[0] === '1') return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+	return digits;
+}
+
 // Populate form with profile data
 function populateForm(profile) {
 	STANDARD_FIELDS.forEach(field => {
 		const input = document.getElementById(field);
 		if (input && profile[field]) {
-			input.value = profile[field];
+			input.value = field === 'phone' ? formatPhoneDisplay(profile[field]) : profile[field];
 		}
 	});
 
@@ -92,7 +99,10 @@ function renderDynamicFields(extraFields) {
 
 	keys.forEach(key => {
 		const row = document.createElement('div');
-		row.className = 'form-row';
+		row.className = 'extra-field-row';
+
+		const formRow = document.createElement('div');
+		formRow.className = 'form-row';
 
 		const label = document.createElement('label');
 		label.htmlFor = `dynamic-${key}`;
@@ -104,8 +114,16 @@ function renderDynamicFields(extraFields) {
 		input.name = `extra_${key}`;
 		input.value = extraFields[key] || '';
 
-		row.appendChild(label);
-		row.appendChild(input);
+		formRow.appendChild(label);
+		formRow.appendChild(input);
+
+		const deleteBtn = el('button', 'btn-icon delete', '\uD83D\uDDD1\uFE0F');
+		deleteBtn.type = 'button';
+		deleteBtn.title = 'Delete this field';
+		deleteBtn.addEventListener('click', () => deleteExtraField(key));
+
+		row.appendChild(formRow);
+		row.appendChild(deleteBtn);
 		dynamicFieldsContainer.appendChild(row);
 	});
 }
@@ -144,6 +162,12 @@ async function loadSiteData() {
 
 // Render site-specific data
 function renderSiteData(siteData) {
+	// Preserve which sites are expanded before re-rendering
+	const expandedSites = new Set(
+		[...siteDataContainer.querySelectorAll('.site-item.expanded')]
+			.map(item => item.dataset.site)
+	);
+
 	siteDataContainer.innerHTML = '';
 
 	const sites = Object.keys(siteData);
@@ -155,6 +179,8 @@ function renderSiteData(siteData) {
 	sites.forEach(site => {
 		const fields = siteData[site];
 		const siteItem = el('div', 'site-item');
+		siteItem.dataset.site = site;
+		if (expandedSites.has(site)) siteItem.classList.add('expanded');
 
 		const siteHeader = el('div', 'site-header');
 		const siteName = el('span', 'site-name');
@@ -198,7 +224,7 @@ function renderSiteData(siteData) {
 			fieldInfo.appendChild(fieldNameEl);
 			fieldInfo.appendChild(fieldValueEl);
 
-			const deleteFieldBtn = el('button', 'btn-icon delete', '\u2715');
+			const deleteFieldBtn = el('button', 'btn-icon delete', '\uD83D\uDDD1\uFE0F');
 			deleteFieldBtn.type = 'button';
 			deleteFieldBtn.title = 'Delete this field';
 			deleteFieldBtn.addEventListener('click', () => {
@@ -214,6 +240,24 @@ function renderSiteData(siteData) {
 		siteItem.appendChild(siteFields);
 		siteDataContainer.appendChild(siteItem);
 	});
+}
+
+// Delete a single extra field from profile
+async function deleteExtraField(fieldName) {
+	try {
+		const res = await fetch(`${SERVER_BASE}/api/db/profile/extra`, {
+			method: 'DELETE',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ userId: USER_ID, fieldName })
+		});
+		const { profile } = await res.json();
+		currentProfile = profile;
+		renderDynamicFields(profile.extra_fields || {});
+		showMessage(`Deleted "${formatFieldLabel(fieldName)}"`, 'success');
+	} catch (error) {
+		console.error('Delete extra field error:', error);
+		showMessage('Failed to delete field.');
+	}
 }
 
 // Delete a single field from a site

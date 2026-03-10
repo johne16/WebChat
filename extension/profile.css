@@ -281,6 +281,17 @@ h2 {
 	margin-bottom: 12px;
 }
 
+/* Extra field rows */
+.extra-field-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.extra-field-row .form-row {
+	flex: 1;
+}
+
 /* Site data section */
 .empty-state {
 	color: var(--muted);

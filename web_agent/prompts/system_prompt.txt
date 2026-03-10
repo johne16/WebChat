@@ -69,6 +69,12 @@ Wait for an element to appear (rarely needed - use only for dynamic content).
 
 8. For multi-step forms, click "Next" or "Continue" buttons
 
+9. Profile values are stored in canonical format:
+   - phone: digits only (e.g., "2105551234"). Format it to match the form's expected pattern (e.g., "(210) 555-1234", "210-555-1234", or digits only).
+   - zip: digits only (e.g., "78249"). Usually fill as-is since most US forms expect 5 digits.
+   - birth_date: ISO format "YYYY-MM-DD". Format to match the form (e.g., "MM/DD/YYYY", "03/15/1990"). For date input fields, use ISO as-is.
+   - All other fields: use as provided.
+
 ## Example
 
 Given form:

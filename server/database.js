@@ -258,7 +258,18 @@ export function getProfile(userId = 1) {
 	return row;
 }
 
+function normalizeProfileFields(data) {
+	if (data.phone) {
+		data.phone = data.phone.replace(/\D/g, '');
+	}
+	if (data.zip) {
+		data.zip = data.zip.replace(/\D/g, '');
+	}
+	return data;
+}
+
 export function upsertProfile(userId = 1, data) {
+	data = normalizeProfileFields(data);
 	// Item 4: Rely on SQL COALESCE instead of fetching existing profile first
 	const extraFields = data.extra_fields
 		? JSON.stringify(data.extra_fields)
@@ -303,6 +314,19 @@ export function updateProfileExtraField(userId = 1, fieldName, fieldValue) {
 	const profile = getProfile(userId);
 	const extraFields = profile?.extra_fields || {};
 	extraFields[fieldName] = fieldValue;
+
+	db.prepare(`
+		UPDATE profile SET extra_fields = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE user_id = ?
+	`).run(encryptField(JSON.stringify(extraFields)), userId);
+
+	return getProfile(userId);
+}
+
+export function deleteProfileExtraField(userId = 1, fieldName) {
+	const profile = getProfile(userId);
+	const extraFields = profile?.extra_fields || {};
+	delete extraFields[fieldName];
 
 	db.prepare(`
 		UPDATE profile SET extra_fields = ?, updated_at = CURRENT_TIMESTAMP

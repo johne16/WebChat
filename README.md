@@ -8,7 +8,7 @@ WebChat is a Chromium extension that adds an AI-powered side panel to help users
 
 * **Node.js** and **npm** installed
 * Chromium-based browser (Chrome, Brave, Edge)
-* **Docker** installed and running (required for Crawl4AI)
+* **Python dependencies** from `crawl_service/requirements.txt` (required for Crawl4AI)
 * **Python 3.13+** with dependencies from `web_agent/requirements.txt` (required for Agent Mode)
 
 ## Setup
@@ -49,10 +49,11 @@ The extension requires two services running. Start each in a separate terminal:
 ### Terminal 1: Crawl4AI
 
 ```bash
-docker run -p 11235:11235 unclecode/crawl4ai
+cd crawl_service
+python crawl_service.py
 ```
 
-Crawl4AI must be running on port 11235 for page content extraction.
+The Crawl4AI service must be running on port 11235 for page content extraction.
 
 ### Terminal 2: WebChat Server
 
@@ -96,7 +97,7 @@ The server listens on port 8787 (configurable via `.env`). It handles:
         ▼                 ▼            ▼             ▼
    OpenAI /          Crawl4AI      Brave Search   web_agent
    Anthropic API     :11235        (cloud)        :5001-5005
-   (cloud)           (Docker)                     (spawned by server)
+   (cloud)           (local)                      (spawned by server)
 ```
 
 ### Request Flow
@@ -221,6 +222,9 @@ Profile data is encrypted at rest with AES-256-GCM using the server's `DATABASE_
 │   ├── metricsLogger.js        # JSONL metrics appender (chat/research turnaround times)
 │   ├── server.js              # Main Express app (imports route modules)
 │   └── sseManager.js          # SSE state management
+├── crawl_service/             # Crawl4AI extraction service (Python/FastAPI)
+│   ├── crawl_service.py       # FastAPI app wrapping AsyncWebCrawler
+│   └── requirements.txt       # Python dependencies
 ├── web_agent/                 # Autonomous web agent (Python/FastAPI)
 │   ├── src/                   # Agent modules
 │   ├── prompts/               # LLM planning prompts
@@ -354,7 +358,7 @@ See `notes/debugging_notes.md` for curl-based endpoint tests.
 
 ### Smoke Test
 
-1. Start Crawl4AI: `docker run -p 11235:11235 unclecode/crawl4ai`
+1. Start Crawl4AI: `cd crawl_service && python crawl_service.py`
 2. Start server: `cd server && npm start`
 3. Load extension in browser
 4. Verify Testing Mode echo works
@@ -364,5 +368,5 @@ See `notes/debugging_notes.md` for curl-based endpoint tests.
 ## Common Issues
 
 * **`node_modules/` missing:** Run `npm install` in `./server`
-* **Crawl4AI errors:** Ensure Docker container is running on port 11235
+* **Crawl4AI errors:** Ensure the crawl service is running on port 11235
 * **Extension not updating:** Reload extension at `chrome://extensions` after code changes

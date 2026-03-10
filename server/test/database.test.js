@@ -20,6 +20,7 @@ import {
 	getProfile,
 	upsertProfile,
 	updateProfileExtraField,
+	deleteProfileExtraField,
 	getSiteData,
 	upsertSiteData,
 	deleteSiteData,
@@ -81,6 +82,20 @@ describe("database", () => {
 
 			expect(profile.extra_fields.nickname).toBe("Johnny");
 			expect(profile.extra_fields.favoriteColor).toBe("blue"); // preserved
+		});
+
+		it("deleteProfileExtraField deletes one key and preserves others", () => {
+			const profile = deleteProfileExtraField(1, "nickname");
+
+			expect(profile.extra_fields.nickname).toBeUndefined();
+			expect(profile.extra_fields.favoriteColor).toBe("blue"); // preserved
+		});
+
+		it("deleteProfileExtraField on nonexistent key is a no-op", () => {
+			const before = getProfile(1);
+			const after = deleteProfileExtraField(1, "nonexistent_key");
+
+			expect(after.extra_fields).toEqual(before.extra_fields);
 		});
 
 		it("stores encrypted data in the raw DB but returns plaintext via getProfile", () => {
