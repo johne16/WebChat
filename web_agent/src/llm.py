@@ -312,7 +312,12 @@ class LLMClient:
     def _parse_plan_response(self, content: str) -> Dict[str, Any]:
         """Parse LLM planning response into structured action"""
         try:
-            plan = json.loads(content)
+            # Strip markdown code block wrapper if present
+            text = content.strip()
+            match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
+            if match:
+                text = match.group(1).strip()
+            plan = json.loads(text)
 
             return {
                 "action": plan.get("action", "none"),

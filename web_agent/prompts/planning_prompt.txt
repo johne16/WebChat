@@ -72,8 +72,8 @@ You have access to memory from previous actions in this session:
 - **visited_urls**: Pages you've already visited
 - **recent_actions**: Your last few actions and their results
 
-When filling forms, if memory contains data that matches what's needed (e.g., email, password),
-the system will automatically use those values.
+When filling forms, if memory contains data that matches what's needed (e.g., email),
+the system will automatically use those values. Only use data that exists in the user profile or memory. If a required field has no matching data, use "needs_input" to ask the user.
 
 ## Important Guidelines
 
@@ -83,6 +83,7 @@ the system will automatically use those values.
 4. **Recognize success** - Look for success messages, confirmation pages, or expected destinations
 5. **Handle errors gracefully** - If an action fails, try an alternative approach
 6. **Be specific with selectors** - Prefer using link_text/button_text over CSS selectors when possible
+7. **Never fabricate data** - If a required form field (password, security answer, etc.) is not in the user profile or memory, set goal_status to "needs_input" and list the missing fields. Never generate or guess values.
 
 ## Examples
 

@@ -28,6 +28,7 @@ WebChat is a Chromium extension that adds an AI-powered side panel to help users
    - Get your Brave Search API key from [https://brave.com/search/api/](https://brave.com/search/api/)
    - `ANTHROPIC_API_KEY` is only needed if you select an Anthropic model in settings
    - `DATABASE_ENCRYPTION_KEY` encrypts sensitive profile data at rest in SQLite. Generate it once and keep it safe; losing this key makes existing data unrecoverable. The server will not start without it.
+   - `openssl rand -hex 32` is a bash command that prints the key to stdout. Run it in Git Bash or WSL on Windows (PowerShell does not include OpenSSL by default). Copy the output into your `.env` file.
 
 3. Install server dependencies:
    ```bash
@@ -120,8 +121,7 @@ Progress for research and agent tasks is shown in the header bar rather than inl
 **Agent Task Flow:**
 1. User sends action request: "Sign me up on ABC Power's website"
 2. Intent detected as agent task, URL resolved
-3. If profile locked → prompt for passphrase
-4. Confirmation prompt → user says "yes"
+3. Confirmation prompt → user says "yes"
 5. Server spawns agent on available port (5001-5005)
 6. Agent executes in visible browser, status updates via SSE
 7. If `needs_input` → inline form appears for missing data
@@ -152,8 +152,7 @@ WebChat automatically detects when you want to perform an action on a website an
 
 1. Type a request: "Sign me up at https://example.com" or "Register me on ABC Power"
 2. WebChat detects this as an agent task and asks for confirmation
-3. If your profile is locked, you'll be prompted for your passphrase
-4. Say "yes" to proceed
+3. Say "yes" to proceed
 5. The server spawns an agent on an available port (5001-5005)
 6. The agent opens a browser window and executes the task
 7. Real-time status updates appear in the header bar via SSE
@@ -179,10 +178,9 @@ WebChat automatically detects when you want to perform an action on a website an
 Agent mode requires an encrypted user profile for form filling:
 
 1. Open Settings (⚙️) → Manage Profile
-2. Create profile with passphrase
-3. Fill in personal information and save
+2. Fill in personal information and save
 
-Profile data is encrypted with AES-256-GCM (PBKDF2, 100k iterations). Passphrase is never stored.
+Profile data is encrypted at rest with AES-256-GCM using the server's `DATABASE_ENCRYPTION_KEY`.
 
 ## Project Structure
 
@@ -352,146 +350,7 @@ CREATE TABLE learned_context (
 
 ## Testing
 
-### Multi-Agent Spawning
-
-1. **Start the server:**
-   ```bash
-   cd server
-   npm start
-   ```
-
-2. **Check agent pool status (should be empty):**
-   ```bash
-   curl http://localhost:8787/api/agent/status
-   ```
-   Expected: `{"agents":[],"availablePorts":[5001,5002,5003,5004,5005]}`
-
-3. **Spawn an agent:**
-   ```bash
-   curl -X POST http://localhost:8787/api/agent/start \
-     -H "Content-Type: application/json" \
-     -d '{"taskId": "test-1"}'
-   ```
-   Expected: `{"success":true,"port":5001,"taskId":"test-1"}`
-
-4. **Check status (should show one running agent):**
-   ```bash
-   curl http://localhost:8787/api/agent/status
-   ```
-
-5. **Spawn a second agent:**
-   ```bash
-   curl -X POST http://localhost:8787/api/agent/start \
-     -H "Content-Type: application/json" \
-     -d '{"taskId": "test-2"}'
-   ```
-
-6. **Stop an agent:**
-   ```bash
-   curl -X POST http://localhost:8787/api/agent/stop \
-     -H "Content-Type: application/json" \
-     -d '{"port": 5001}'
-   ```
-
-7. **Graceful shutdown:** Press `Ctrl+C` on the server. All running agents are killed automatically.
-
-### Database Operations
-
-1. **Start the server:**
-   ```bash
-   cd server
-   npm start
-   ```
-
-2. **Check database was created:**
-   ```bash
-   ls server/data/
-   ```
-   Expected: `webchat.db`
-
-3. **Get profile (should be empty initially):**
-   ```bash
-   curl http://localhost:8787/api/db/profile
-   ```
-
-4. **Create/update profile:**
-   ```bash
-   curl -X POST http://localhost:8787/api/db/profile \
-     -H "Content-Type: application/json" \
-     -d '{"first_name": "John", "last_name": "Doe", "email": "john@example.com"}'
-   ```
-
-5. **Add extra field (e.g., SSN):**
-   ```bash
-   curl -X POST http://localhost:8787/api/db/profile/extra \
-     -H "Content-Type: application/json" \
-     -d '{"fieldName": "ssn", "fieldValue": "123-45-6789"}'
-   ```
-
-6. **Add site data:**
-   ```bash
-   curl -X POST http://localhost:8787/api/db/site-data \
-     -H "Content-Type: application/json" \
-     -d '{"domain": "example.com", "fieldName": "username", "fieldValue": "johndoe"}'
-   ```
-
-7. **Get full user data (what agents receive):**
-   ```bash
-   curl http://localhost:8787/api/db/user-data
-   ```
-
-### SSE and Webhooks (Real-Time Communication)
-
-1. **Start the server:**
-   ```bash
-   cd server
-   npm start
-   ```
-
-2. **Connect to SSE stream (in a separate terminal, keep running):**
-   ```bash
-   curl -N http://localhost:8787/api/events
-   ```
-   Expected: Initial `connected` and `state` events, then stream stays open.
-
-3. **Spawn an agent (in another terminal):**
-   ```bash
-   curl -X POST http://localhost:8787/api/agent/start \
-     -H "Content-Type: application/json" \
-     -d '{"taskId": "test-sse"}'
-   ```
-   Expected: SSE terminal shows no new events yet (webhooks come during execution).
-
-4. **Simulate a webhook (test the endpoint directly):**
-   ```bash
-   curl -X POST http://localhost:8787/api/agent/webhook \
-     -H "Content-Type: application/json" \
-     -d '{"port": 5001, "taskId": "test-sse", "sessionId": "sess-1", "status": "started", "message": "Test started"}'
-   ```
-   Expected: SSE terminal shows `agent-status` event with the data.
-
-5. **Simulate needs_input webhook:**
-   ```bash
-   curl -X POST http://localhost:8787/api/agent/webhook \
-     -H "Content-Type: application/json" \
-     -d '{"port": 5001, "taskId": "test-sse", "sessionId": "sess-1", "status": "needs_input", "missingFields": ["ssn", "securityAnswer"]}'
-   ```
-   Expected: SSE terminal shows both `agent-status` and `needs-input` events.
-
-6. **Check needs_input queue:**
-   ```bash
-   curl http://localhost:8787/api/agent/needs-input
-   ```
-   Expected: `{"queue":[{"port":5001,"taskId":"test-sse","sessionId":"sess-1","missingFields":["ssn","securityAnswer"],...}]}`
-
-7. **Stop the agent:**
-   ```bash
-   curl -X POST http://localhost:8787/api/agent/stop \
-     -H "Content-Type: application/json" \
-     -d '{"port": 5001}'
-   ```
-
-8. **Close the SSE connection:** Press `Ctrl+C` in the SSE terminal.
+See `notes/debugging_notes.md` for curl-based endpoint tests.
 
 ### Smoke Test
 

@@ -99,7 +99,7 @@ function renderDynamicFields(extraFields) {
 		label.textContent = formatFieldLabel(key);
 
 		const input = document.createElement('input');
-		input.type = 'text';
+		input.type = isSensitiveField(key) ? 'password' : 'text';
 		input.id = `dynamic-${key}`;
 		input.name = `extra_${key}`;
 		input.value = extraFields[key] || '';

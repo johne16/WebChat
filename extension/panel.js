@@ -161,7 +161,7 @@ function handleAgentStatusEvent(data) {
 		}
 		case 'achieved':
 			updateHeaderProgress('');
-			addMessage('bot', data.message || 'Task completed successfully!');
+			addMessage('bot', data.message || 'Goal completed successfully');
 			hideStopButton();
 			clearAgentSession();
 			break;
@@ -401,7 +401,7 @@ async function executeAgentTask(goal, url) {
 
 		// Handle immediate response (non-SSE path for backwards compatibility)
 		if (result.status === 'achieved' || result.goalAchieved) {
-			addMessage('bot', result.message || 'Task completed successfully!');
+			addMessage('bot', result.message || 'Goal completed successfully');
 		} else if (result.status === 'failed' || result.status === 'blocked') {
 			addMessage('bot', result.message || 'Task could not be completed.');
 		}
