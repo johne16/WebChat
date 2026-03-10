@@ -3,8 +3,7 @@
 
 import { startAgent, stopAgent, executeGoal, provideInput } from './agentClient.js';
 import { extractDomain } from './utils.js';
-import { getConfig } from './config.js';
-import { SERVER_BASE } from './config.js';
+import { getConfig, getUserId, SERVER_BASE } from './config.js';
 
 // Agent session state
 let agentSession = { sessionId: null, port: null, taskId: null };
@@ -16,7 +15,7 @@ let currentAgentUrl = null;
  */
 export async function isProfileUnlocked() {
 	try {
-		const userId = getConfig()?.extension?.userId || 1;
+		const userId = getUserId();
 		const res = await fetch(`${SERVER_BASE}/api/db/profile?userId=${userId}`);
 		if (!res.ok) return false;
 		const data = await res.json();
@@ -196,7 +195,7 @@ async function saveSiteData(formData) {
 
 	try {
 		const domain = extractDomain(currentAgentUrl);
-		const userId = getConfig()?.extension?.userId || 1;
+		const userId = getUserId();
 
 		const NEVER_STORE_FIELDS = ['ssn', 'social_security', 'socialsecurity', 'social-security'];
 

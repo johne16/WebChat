@@ -16,6 +16,8 @@ export const MAX_AGENT_RESTARTS = appConfig.agent.maxRestarts;
 // Item 9: Renamed to SERVER_PORT to avoid shadowing
 export const SERVER_PORT = process.env.PORT || appConfig.server.port;
 
+export const DEFAULT_USER_ID = appConfig.extension.userId;
+
 export const DATABASE_ENCRYPTION_KEY = process.env.DATABASE_ENCRYPTION_KEY;
 
 // TLD state (populated by server.js at startup, read by proxy.js config endpoint)

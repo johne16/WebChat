@@ -1,7 +1,7 @@
 // extension/panel.js
 // Main entry point - unified message handling with SSE integration
 
-import { SERVER_BASE, loadConfig, getConfig } from './config.js';
+import { SERVER_BASE, loadConfig, getConfig, getUserId } from './config.js';
 import { sendToBot } from './llmClient.js';
 import { runReActLoop } from './react.js';
 import { connectSSE, disconnectSSE } from './agentClient.js';
@@ -325,7 +325,7 @@ async function handleResearchIntent(text, currentUrl) {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					userId: getConfig()?.extension?.userId || 1,
+					userId: getUserId(),
 					messages: [
 						{ role: 'user', content: text },
 						{ role: 'assistant', content: answer }

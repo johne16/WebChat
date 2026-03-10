@@ -1,6 +1,6 @@
 // routes/proxy.js - LLM, content extraction, and Brave Search proxy endpoints
 import { Router } from "express";
-import { appConfig, PROVIDER, getTldSet } from "../config.js";
+import { appConfig, PROVIDER, DEFAULT_USER_ID, getTldSet } from "../config.js";
 import { getHistory, addMessage } from "../conversationHistory.js";
 import { chat as openaiChat } from "../providers/openai.js";
 import { chat as anthropicChat } from "../providers/anthropic.js";
@@ -17,7 +17,7 @@ const providers = {
 // LLM chat endpoint (supports OpenAI and Anthropic via provider field)
 router.post("/api/llm/chat", async (req, res) => {
 	try {
-		const { model, messages, provider, userId = 1, storeInHistory = false, flow } = req.body;
+		const { model, messages, provider, userId = DEFAULT_USER_ID, storeInHistory = false, flow } = req.body;
 		const effectiveProvider = provider || PROVIDER;
 		console.log("[LLM] Request received - provider:", effectiveProvider, "model:", model, "messages:", messages?.length);
 
@@ -87,7 +87,7 @@ router.post("/api/llm/chat", async (req, res) => {
 // Manually add conversation turns to history (used by ReAct after completion)
 router.post("/api/history/add", async (req, res) => {
 	try {
-		const { userId = 1, messages } = req.body;
+		const { userId = DEFAULT_USER_ID, messages } = req.body;
 		if (!Array.isArray(messages)) {
 			return res.status(400).json({ error: "Missing or invalid messages array" });
 		}

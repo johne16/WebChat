@@ -1,5 +1,6 @@
 // routes/database.js - Database API endpoints
 import { Router } from "express";
+import { DEFAULT_USER_ID } from "../config.js";
 import {
 	getProfile,
 	upsertProfile,
@@ -22,7 +23,7 @@ const router = Router();
 
 // Hardcode until auth is implemented
 function getUserId(req) {
-	return 1;
+	return DEFAULT_USER_ID;
 }
 
 // Item 15: Wraps a route handler with try/catch and standard error response

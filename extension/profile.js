@@ -2,7 +2,7 @@
 // Profile management page logic - uses server API
 
 import { formatFieldLabel } from './ui.js';
-import { getConfig, loadConfig, SERVER_BASE } from './config.js';
+import { getUserId, loadConfig, SERVER_BASE } from './config.js';
 
 // Inline SVGs for eye toggle (no external deps)
 const SVG_EYE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -32,7 +32,7 @@ function addEyeToggle(input) {
 // Load config from server (profile.html is a standalone page)
 await loadConfig();
 
-const USER_ID = getConfig()?.extension?.userId || 1;
+const USER_ID = getUserId();
 
 // DOM elements
 const messageEl = document.getElementById('message');

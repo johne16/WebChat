@@ -1,6 +1,6 @@
 // extension/llmClient.js
 
-import { SERVER_BASE, getConfig } from './config.js';
+import { SERVER_BASE, getConfig, getUserId } from './config.js';
 import { extractPage, parseJsonFromLLM } from './utils.js';
 
 // Cache modelType and provider at module level (item 4)
@@ -32,12 +32,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
  * @param {Array} messages - Chat messages array
  * @param {string} errorLabel - Label for error messages
  * @param {Object} [options] - Optional parameters
- * @param {number} [options.userId=1] - User ID for conversation history
+ * @param {number} [options.userId] - User ID for conversation history (defaults to getUserId())
  * @param {boolean} [options.storeInHistory=false] - Whether to store this exchange in history
  * @param {string} [options.provider] - LLM provider ('openai' or 'anthropic')
  * @returns {Promise<Object>} Parsed response data
  */
-async function callLLM(model, messages, errorLabel = 'LLM', { userId = 1, storeInHistory = false, provider, flow } = {}) {
+async function callLLM(model, messages, errorLabel = 'LLM', { userId = getUserId(), storeInHistory = false, provider, flow } = {}) {
 	const res = await fetch(`${SERVER_BASE}/api/llm/chat`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },

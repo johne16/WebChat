@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { DATABASE_ENCRYPTION_KEY } from './config.js';
+import { DATABASE_ENCRYPTION_KEY, DEFAULT_USER_ID } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -249,7 +249,7 @@ export function getDatabase() {
 // Profile Operations
 // =============================================================================
 
-export function getProfile(userId = 1) {
+export function getProfile(userId = DEFAULT_USER_ID) {
 	const row = db.prepare(`
 		SELECT * FROM profile WHERE user_id = ?
 	`).get(userId);
@@ -275,7 +275,7 @@ function normalizeProfileFields(data) {
 	return data;
 }
 
-export function upsertProfile(userId = 1, data) {
+export function upsertProfile(userId = DEFAULT_USER_ID, data) {
 	data = normalizeProfileFields(data);
 	// Item 4: Rely on SQL COALESCE instead of fetching existing profile first
 	const extraFields = data.extra_fields
@@ -317,7 +317,7 @@ export function upsertProfile(userId = 1, data) {
 	return getProfile(userId);
 }
 
-export function updateProfileExtraField(userId = 1, fieldName, fieldValue) {
+export function updateProfileExtraField(userId = DEFAULT_USER_ID, fieldName, fieldValue) {
 	const profile = getProfile(userId);
 	const extraFields = profile?.extra_fields || {};
 	extraFields[fieldName] = fieldValue;
@@ -330,7 +330,7 @@ export function updateProfileExtraField(userId = 1, fieldName, fieldValue) {
 	return getProfile(userId);
 }
 
-export function deleteProfileExtraField(userId = 1, fieldName) {
+export function deleteProfileExtraField(userId = DEFAULT_USER_ID, fieldName) {
 	const profile = getProfile(userId);
 	const extraFields = profile?.extra_fields || {};
 	delete extraFields[fieldName];
@@ -347,7 +347,7 @@ export function deleteProfileExtraField(userId = 1, fieldName) {
 // Site Data Operations
 // =============================================================================
 
-export function getSiteData(userId = 1, domain = null) {
+export function getSiteData(userId = DEFAULT_USER_ID, domain = null) {
 	let rows;
 	if (domain) {
 		rows = db.prepare(`
@@ -366,7 +366,7 @@ export function getSiteData(userId = 1, domain = null) {
 	return rows;
 }
 
-export function upsertSiteData(userId = 1, domain, fieldName, fieldValue) {
+export function upsertSiteData(userId = DEFAULT_USER_ID, domain, fieldName, fieldValue) {
 	db.prepare(`
 		INSERT INTO site_data (user_id, domain, field_name, field_value)
 		VALUES (?, ?, ?, ?)
@@ -377,14 +377,14 @@ export function upsertSiteData(userId = 1, domain, fieldName, fieldValue) {
 	return getSiteData(userId, domain);
 }
 
-export function deleteProfile(userId = 1) {
+export function deleteProfile(userId = DEFAULT_USER_ID) {
 	db.prepare('DELETE FROM profile WHERE user_id = ?').run(userId);
 	db.prepare('DELETE FROM site_data WHERE user_id = ?').run(userId);
 	db.prepare('DELETE FROM learned_context WHERE user_id = ?').run(userId);
 	db.prepare('UPDATE users SET passphrase_hash = NULL WHERE id = ?').run(userId);
 }
 
-export function deleteSiteData(userId = 1, domain, fieldName = null) {
+export function deleteSiteData(userId = DEFAULT_USER_ID, domain, fieldName = null) {
 	if (fieldName) {
 		db.prepare(`
 			DELETE FROM site_data WHERE user_id = ? AND domain = ? AND field_name = ?
@@ -400,7 +400,7 @@ export function deleteSiteData(userId = 1, domain, fieldName = null) {
 // Learned Context Operations
 // =============================================================================
 
-export function getLearnedContext(userId = 1) {
+export function getLearnedContext(userId = DEFAULT_USER_ID) {
 	const rows = db.prepare(`
 		SELECT * FROM learned_context WHERE user_id = ?
 		ORDER BY created_at DESC
@@ -412,7 +412,7 @@ export function getLearnedContext(userId = 1) {
 	return rows;
 }
 
-export function addLearnedContext(userId = 1, fact, source = null) {
+export function addLearnedContext(userId = DEFAULT_USER_ID, fact, source = null) {
 	const result = db.prepare(`
 		INSERT INTO learned_context (user_id, fact, source)
 		VALUES (?, ?, ?)
@@ -449,18 +449,18 @@ export function setCachedTlds(tldArray) {
 // Passphrase Operations
 // =============================================================================
 
-export function hasPassphrase(userId = 1) {
+export function hasPassphrase(userId = DEFAULT_USER_ID) {
 	const row = db.prepare('SELECT passphrase_hash FROM users WHERE id = ?').get(userId);
 	return !!(row && row.passphrase_hash);
 }
 
-export function setPassphrase(userId = 1, passphrase) {
+export function setPassphrase(userId = DEFAULT_USER_ID, passphrase) {
 	const salt = crypto.randomBytes(32).toString('hex');
 	const hash = crypto.scryptSync(passphrase, salt, 64).toString('hex');
 	db.prepare('UPDATE users SET passphrase_hash = ? WHERE id = ?').run(`${salt}:${hash}`, userId);
 }
 
-export function verifyPassphrase(userId = 1, passphrase) {
+export function verifyPassphrase(userId = DEFAULT_USER_ID, passphrase) {
 	const row = db.prepare('SELECT passphrase_hash FROM users WHERE id = ?').get(userId);
 	if (!row || !row.passphrase_hash) return false;
 	const [salt, storedHash] = row.passphrase_hash.split(':');
@@ -472,7 +472,7 @@ export function verifyPassphrase(userId = 1, passphrase) {
 // Utility: Get full user data (for agents)
 // =============================================================================
 
-export function getFullUserData(userId = 1) {
+export function getFullUserData(userId = DEFAULT_USER_ID) {
 	const profile = getProfile(userId);
 	const siteData = getSiteData(userId);
 

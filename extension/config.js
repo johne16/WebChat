@@ -30,3 +30,11 @@ export async function loadConfig() {
 export function getConfig() {
 	return _configCache;
 }
+
+/**
+ * Get the current user ID from cached config
+ * @returns {number}
+ */
+export function getUserId() {
+	return _configCache?.extension?.userId || 1;
+}

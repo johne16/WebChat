@@ -18,7 +18,7 @@ import {
 	addToNeedsInputQueue
 } from "../sseManager.js";
 import { getFullUserData } from "../database.js";
-import { AGENT_CONFIG } from "../config.js";
+import { AGENT_CONFIG, DEFAULT_USER_ID } from "../config.js";
 
 const router = Router();
 
@@ -44,7 +44,7 @@ router.post("/api/agent/start", async (req, res) => {
 // POST /api/agent/execute-goal - Proxy goal execution to agent
 router.post("/api/agent/execute-goal", async (req, res) => {
 	try {
-		const { port, goal, startUrl, userProfile, options, userId = 1, provider, model } = req.body;
+		const { port, goal, startUrl, userProfile, options, userId = DEFAULT_USER_ID, provider, model } = req.body;
 
 		if (!port || !goal) {
 			return res.status(400).json({ error: "Missing port or goal" });
