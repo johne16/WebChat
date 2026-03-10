@@ -1,7 +1,7 @@
 // agentManager.js - Agent process spawning, health checks, lifecycle management
+import crypto from "crypto";
 import { spawn } from "child_process";
 import { AGENT_CONFIG, MAX_AGENT_RESTARTS } from "./config.js";
-import { getDatabasePath } from "./database.js";
 
 // Track running agents: port -> { process, taskId, startedAt, timeoutHandle, restartCount }
 const agentsByPort = new Map();
@@ -34,16 +34,15 @@ async function waitForHealth(port, maxAttempts = AGENT_CONFIG.healthCheckMaxAtte
 }
 
 // Item 1: Shared helper for creating agent processes (used by spawnAgent and handleAgentExit)
-function createAgentProcess(port) {
+function createAgentProcess(port, webhookToken) {
 	const callbackUrl = `${AGENT_CONFIG.callbackBaseUrl}/api/agent/webhook`;
-	const dbPath = getDatabasePath();
 
 	// Spawn the Python agent process (-u for unbuffered output)
 	const agentProcess = spawn(AGENT_CONFIG.pythonPath, [
 		"-u", "-m", "src.agent_service",
 		"--port", port.toString(),
 		"--callback-url", callbackUrl,
-		"--database-path", dbPath
+		"--webhook-token", webhookToken
 	], {
 		cwd: AGENT_CONFIG.agentPath,
 		stdio: ["ignore", "pipe", "pipe"]
@@ -73,19 +72,26 @@ function handleAgentExit(port, code, signal) {
 		console.log(`[Agent:${port}] Unexpected exit, attempting restart...`);
 		agent.restartCount++;
 
-		// Item 1: Use shared helper
-		const agentProcess = createAgentProcess(port);
+		// Item 1: Use shared helper (reuse existing webhook token)
+		const agentProcess = createAgentProcess(port, agent.webhookToken);
 		agentProcess.on("error", (err) => {
 			console.error(`[Agent:${port}] Restart spawn error: ${err.message}`);
 			agentsByPort.delete(port);
 		});
 		agentProcess.on("exit", (c, s) => handleAgentExit(port, c, s));
 
+		agent.restarting = true;
 		agent.process = agentProcess;
 		agent.timeoutHandle = setTimeout(() => {
 			console.log(`[Agent:${port}] Timeout reached after restart, killing process`);
 			killAgent(port);
 		}, AGENT_CONFIG.timeoutMs);
+
+		waitForHealth(port).then(() => {
+			agent.restarting = false;
+		}).catch(() => {
+			agentsByPort.delete(port);
+		});
 	} else {
 		// Clean up
 		agentsByPort.delete(port);
@@ -102,8 +108,11 @@ export async function spawnAgent(taskId) {
 
 	console.log(`[Agent] Spawning agent on port ${port} for task ${taskId}`);
 
+	// Generate a per-agent webhook authentication token
+	const webhookToken = crypto.randomBytes(32).toString('hex');
+
 	// Item 1: Use shared helper
-	const agentProcess = createAgentProcess(port);
+	const agentProcess = createAgentProcess(port, webhookToken);
 
 	// Track spawn errors so we can reject health check with the real cause
 	let spawnError = null;
@@ -133,7 +142,8 @@ export async function spawnAgent(taskId) {
 		taskId,
 		startedAt: Date.now(),
 		timeoutHandle,
-		restartCount: 0
+		restartCount: 0,
+		webhookToken
 	});
 
 	// Wait for agent to become healthy (bail early on spawn error)

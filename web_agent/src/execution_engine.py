@@ -53,7 +53,7 @@ JS_CHECK_CHECKBOX = """
 
 JS_SELECT_RADIO = """
 (args) => {
-    const selector = `input[type="radio"][name="${args.name}"][value="${args.value}"]`;
+    const selector = `input[type="radio"][name="${CSS.escape(args.name)}"][value="${CSS.escape(args.value)}"]`;
     const element = document.querySelector(selector);
     if (!element) {
         throw new Error(`Radio button not found: name="${args.name}" value="${args.value}"`);

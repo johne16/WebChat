@@ -9,11 +9,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const configPath = path.resolve(__dirname, "..", "webchat.config.json");
 export const appConfig = Object.freeze(JSON.parse(fs.readFileSync(configPath, "utf-8")));
 
+export const PROVIDER = appConfig.providers.default;
 export const MAX_BODY_SIZE = appConfig.server.maxBodySize;
 export const MAX_AGENT_RESTARTS = appConfig.agent.maxRestarts;
 
 // Item 9: Renamed to SERVER_PORT to avoid shadowing
 export const SERVER_PORT = process.env.PORT || appConfig.server.port;
+
+export const DATABASE_ENCRYPTION_KEY = process.env.DATABASE_ENCRYPTION_KEY;
 
 export const AGENT_CONFIG = {
 	portPool: appConfig.agent.portPool,

@@ -8,16 +8,10 @@ vi.mock('../config.js', () => ({
 			defaultAgentModel: 'gpt-5.2'
 		},
 		extension: {
-			profile: { defaultCountry: 'United States' }
+			profile: { defaultCountry: 'United States' },
+			userId: 1
 		}
 	}))
-}));
-
-const mockDecryptProfile = vi.fn();
-const mockEncryptProfile = vi.fn();
-vi.mock('../crypto.js', () => ({
-	decryptProfile: mockDecryptProfile,
-	encryptProfile: mockEncryptProfile
 }));
 
 const mockStartAgent = vi.fn();
@@ -37,7 +31,7 @@ vi.mock('../utils.js', () => ({
 	})
 }));
 
-let unlockProfile, transformProfileForAgent, startAgentSession,
+let transformProfileForAgent, startAgentSession,
 	executeAgentGoal, provideAgentInput, stopAgentSession,
 	isProfileUnlocked, hasActiveSession, clearAgentSession, getAgentSession;
 
@@ -45,8 +39,12 @@ describe('agent.js', () => {
 	beforeEach(async () => {
 		vi.clearAllMocks();
 		vi.resetModules();
+		// Mock fetch for isProfileUnlocked server calls
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+			ok: true,
+			json: () => Promise.resolve({ profile: { first_name: 'Test' } })
+		}));
 		const agent = await import('../agent.js');
-		unlockProfile = agent.unlockProfile;
 		transformProfileForAgent = agent.transformProfileForAgent;
 		startAgentSession = agent.startAgentSession;
 		executeAgentGoal = agent.executeAgentGoal;
@@ -58,40 +56,37 @@ describe('agent.js', () => {
 		getAgentSession = agent.getAgentSession;
 	});
 
-	describe('unlockProfile', () => {
-		it('decrypts profile from chrome storage', async () => {
-			const encData = { ciphertext: 'abc', salt: 'def', iv: 'ghi' };
-			const profile = { firstName: 'John', email: 'john@test.com' };
-
-			chrome.storage.local.get.mockImplementationOnce((key) =>
-				Promise.resolve({ encryptedUserProfile: encData })
-			);
-			mockDecryptProfile.mockResolvedValue(profile);
-
-			const result = await unlockProfile('mypass');
-
-			expect(mockDecryptProfile).toHaveBeenCalledWith(encData, 'mypass');
-			expect(result).toEqual(profile);
-			expect(isProfileUnlocked()).toBe(true);
+	describe('isProfileUnlocked', () => {
+		it('returns true when server has a profile', async () => {
+			globalThis.fetch.mockResolvedValueOnce({
+				ok: true,
+				json: () => Promise.resolve({ profile: { first_name: 'John' } })
+			});
+			expect(await isProfileUnlocked()).toBe(true);
 		});
 
-		it('throws when no profile exists', async () => {
-			chrome.storage.local.get.mockImplementationOnce(() =>
-				Promise.resolve({ encryptedUserProfile: null })
-			);
+		it('returns false when server has no profile', async () => {
+			globalThis.fetch.mockResolvedValueOnce({
+				ok: true,
+				json: () => Promise.resolve({ profile: null })
+			});
+			expect(await isProfileUnlocked()).toBe(false);
+		});
 
-			await expect(unlockProfile('pass')).rejects.toThrow('No profile found');
+		it('returns false when server is unreachable', async () => {
+			globalThis.fetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+			expect(await isProfileUnlocked()).toBe(false);
 		});
 	});
 
 	describe('transformProfileForAgent', () => {
-		it('nests address fields into address object', () => {
+		it('maps snake_case DB fields to agent format with nested address', () => {
 			const profile = {
-				firstName: 'Jane',
-				lastName: 'Doe',
+				first_name: 'Jane',
+				last_name: 'Doe',
 				email: 'jane@test.com',
 				phone: '555-1234',
-				address: '123 Main St',
+				street: '123 Main St',
 				city: 'San Antonio',
 				state: 'TX',
 				zip: '78201',
@@ -113,26 +108,18 @@ describe('agent.js', () => {
 
 		it('omits address when no address fields present', () => {
 			const result = transformProfileForAgent({
-				firstName: 'Bob',
+				first_name: 'Bob',
 				email: 'bob@test.com'
 			});
 			expect(result.address).toBeUndefined();
 		});
 
-		it('copies unknown dynamic fields', () => {
+		it('copies extra_fields into top level', () => {
 			const result = transformProfileForAgent({
-				firstName: 'Test',
-				customField: 'customValue'
+				first_name: 'Test',
+				extra_fields: { customField: 'customValue' }
 			});
 			expect(result.customField).toBe('customValue');
-		});
-
-		it('excludes siteData from transform', () => {
-			const result = transformProfileForAgent({
-				firstName: 'Test',
-				siteData: { 'example.com': { user: 'x' } }
-			});
-			expect(result.siteData).toBeUndefined();
 		});
 	});
 
@@ -154,16 +141,10 @@ describe('agent.js', () => {
 			await expect(executeAgentGoal('goal', 'https://example.com')).rejects.toThrow('No agent session active');
 		});
 
-		it('sends goal with transformed profile', async () => {
-			// Setup: unlock profile and start session
-			chrome.storage.local.get.mockImplementation((keys) => {
-				if (Array.isArray(keys) ? keys.includes('encryptedUserProfile') : keys === 'encryptedUserProfile') {
-					return Promise.resolve({ encryptedUserProfile: { ciphertext: 'a', salt: 'b', iv: 'c' } });
-				}
-				return Promise.resolve({ agentProvider: 'openai', agentModelType: 'gpt-5.2' });
-			});
-			mockDecryptProfile.mockResolvedValue({ firstName: 'Test', email: 'test@test.com' });
-			await unlockProfile('pass');
+		it('sends goal with empty profile (server merges from DB)', async () => {
+			chrome.storage.local.get.mockImplementation(() =>
+				Promise.resolve({ agentProvider: 'openai', agentModelType: 'gpt-5.2' })
+			);
 
 			mockStartAgent.mockResolvedValue({ port: 5002 });
 			await startAgentSession('task-2');
@@ -176,7 +157,7 @@ describe('agent.js', () => {
 				5002,
 				'Sign up',
 				'https://example.com',
-				expect.objectContaining({ firstName: 'Test', email: 'test@test.com' }),
+				{},  // Empty profile; server handles it
 				expect.objectContaining({ provider: 'openai', model: 'gpt-5.2' })
 			);
 			expect(result.sessionId).toBe('sess-1');

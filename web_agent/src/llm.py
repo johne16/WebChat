@@ -22,9 +22,9 @@ class LLMClient:
     def __init__(
         self,
         api_key: str,
-        model: str = "gpt-5.2",
+        model: str = config.OPENAI_MODEL,
         temperature: float = 0.1,
-        provider: str = "openai"
+        provider: str = config.PROVIDER
     ):
         """Initialize LLM client
 
@@ -210,7 +210,7 @@ class LLMClient:
             }
 
         except Exception as e:
-            raise Exception(f"LLM API error: {str(e)}")
+            raise RuntimeError(f"LLM API error: {str(e)}") from e
 
     async def generate_plan(
         self,

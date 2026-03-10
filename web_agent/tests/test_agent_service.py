@@ -485,12 +485,12 @@ class TestContinueSessionEndpoint:
     async def test_continue_session_success(self, temp_db):
         """Test continuing a paused session with additional data"""
         # Create a session first
-        memory = SessionMemory()
+        memory = await SessionMemory.create()
         memory.goal = "Sign up"
         memory.current_url = "http://example.com/signup"
         memory.status = "needs_input"
         memory.set_missing_fields(["birthCity"])
-        memory.save()
+        await memory.save()
         session_id = memory.session_id
 
         mock_result = {
@@ -547,11 +547,11 @@ class TestContinueSessionEndpoint:
     @pytest.mark.asyncio
     async def test_continue_session_empty_additional_data(self, temp_db):
         """Test continuing session with empty additionalData (for awaiting_user_action)"""
-        memory = SessionMemory()
+        memory = await SessionMemory.create()
         memory.goal = "Sign up"
         memory.current_url = "http://example.com/signup"
         memory.status = "awaiting_user_action"
-        memory.save()
+        await memory.save()
         session_id = memory.session_id
 
         mock_result = {
@@ -591,13 +591,13 @@ class TestContinueSessionEndpoint:
     @pytest.mark.asyncio
     async def test_continue_session_merges_profile_data(self, temp_db):
         """Test that continue endpoint merges additionalData with stored profile"""
-        memory = SessionMemory()
+        memory = await SessionMemory.create()
         memory.goal = "Sign up"
         memory.current_url = "http://example.com/signup"
         memory.status = "needs_input"
         memory.set_user_profile({"email": "test@example.com", "firstName": "John"})
         memory.set_missing_fields(["birthCity"])
-        memory.save()
+        await memory.save()
         session_id = memory.session_id
 
         mock_result = {

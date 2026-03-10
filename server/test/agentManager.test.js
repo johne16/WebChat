@@ -7,11 +7,6 @@ vi.mock("child_process", () => ({
 	spawn: (...args) => mockSpawn(...args)
 }));
 
-// Mock database.js
-vi.mock("../database.js", () => ({
-	getDatabasePath: vi.fn().mockReturnValue("/fake/webchat.db")
-}));
-
 import {
 	getAvailablePort,
 	spawnAgent,
@@ -76,9 +71,13 @@ describe("agentManager", () => {
 			expect(port).toBe(5001);
 			expect(mockSpawn).toHaveBeenCalledWith(
 				expect.stringContaining("python"),
-				expect.arrayContaining(["--port", "5001", "--callback-url", expect.stringContaining("/api/agent/webhook")]),
+				expect.arrayContaining(["--port", "5001", "--callback-url", expect.stringContaining("/api/agent/webhook"), "--webhook-token", expect.any(String)]),
 				expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] })
 			);
+			// Verify webhook token is stored on agent entry
+			const agent = getAgent(5001);
+			expect(agent.webhookToken).toBeDefined();
+			expect(agent.webhookToken).toHaveLength(64); // 32 bytes hex
 			expect(hasAgent(5001)).toBe(true);
 
 			// Cleanup

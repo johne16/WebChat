@@ -2,30 +2,28 @@
 // Agent session management, profile handling, and site data
 
 import { startAgent, stopAgent, executeGoal, provideInput } from './agentClient.js';
-import { decryptProfile, encryptProfile } from './crypto.js';
 import { extractDomain } from './utils.js';
 import { getConfig } from './config.js';
+import { SERVER_BASE } from './config.js';
 
 // Agent session state
 let agentSession = { sessionId: null, port: null, taskId: null };
-let decryptedProfile = null;
-let currentPassphrase = null;
 let currentAgentUrl = null;
 
 /**
- * Check if profile is unlocked
- * @returns {boolean}
+ * Check if profile exists on server
+ * @returns {Promise<boolean>}
  */
-export function isProfileUnlocked() {
-	return decryptedProfile !== null;
-}
-
-/**
- * Get the current decrypted profile
- * @returns {Object|null}
- */
-function getProfile() {
-	return decryptedProfile;
+export async function isProfileUnlocked() {
+	try {
+		const userId = getConfig()?.extension?.userId || 1;
+		const res = await fetch(`${SERVER_BASE}/api/db/profile?userId=${userId}`);
+		if (!res.ok) return false;
+		const data = await res.json();
+		return data.profile != null;
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -45,32 +43,6 @@ export function hasActiveSession() {
 }
 
 /**
- * Unlock profile with passphrase
- * @param {string} passphrase - User's passphrase
- * @returns {Promise<Object>} Decrypted profile
- * @throws {Error} If no profile exists or passphrase is wrong
- */
-export async function unlockProfile(passphrase) {
-	const { encryptedUserProfile } = await chrome.storage.local.get('encryptedUserProfile');
-
-	if (!encryptedUserProfile) {
-		throw new Error('No profile found. Please set up your profile in Settings first.');
-	}
-
-	decryptedProfile = await decryptProfile(encryptedUserProfile, passphrase);
-	currentPassphrase = passphrase;
-	return decryptedProfile;
-}
-
-/**
- * Lock profile (clear decrypted data)
- */
-function lockProfile() {
-	decryptedProfile = null;
-	currentPassphrase = null;
-}
-
-/**
  * Transform flat profile to agent-expected format
  * @param {Object} profile - Flat profile object
  * @returns {Object} Transformed profile with nested address
@@ -78,16 +50,16 @@ function lockProfile() {
 export function transformProfileForAgent(profile) {
 	const transformed = {
 		email: profile.email,
-		firstName: profile.firstName,
-		lastName: profile.lastName,
+		firstName: profile.first_name,
+		lastName: profile.last_name,
 		phone: profile.phone,
-		birthDate: profile.birthDate
+		birthDate: profile.birth_date
 	};
 
 	// Agent expects address as nested object
-	if (profile.address || profile.city || profile.state || profile.zip) {
+	if (profile.street || profile.city || profile.state || profile.zip) {
 		transformed.address = {
-			street: profile.address || '',
+			street: profile.street || '',
 			city: profile.city || '',
 			state: profile.state || '',
 			zip: profile.zip || '',
@@ -95,11 +67,10 @@ export function transformProfileForAgent(profile) {
 		};
 	}
 
-	// Copy any additional dynamic fields
-	const knownFields = ['email', 'firstName', 'lastName', 'phone', 'birthDate', 'address', 'city', 'state', 'zip', 'country', 'siteData'];
-	for (const key of Object.keys(profile)) {
-		if (!knownFields.includes(key)) {
-			transformed[key] = profile[key];
+	// Copy extra_fields
+	if (profile.extra_fields && typeof profile.extra_fields === 'object') {
+		for (const [key, value] of Object.entries(profile.extra_fields)) {
+			transformed[key] = value;
 		}
 	}
 
@@ -129,12 +100,11 @@ export async function executeAgentGoal(goal, startUrl, options = {}) {
 	if (!agentSession.port) {
 		throw new Error('No agent session active');
 	}
-	if (!decryptedProfile) {
-		throw new Error('Profile not unlocked');
-	}
 
 	currentAgentUrl = startUrl;
-	const agentProfile = transformProfileForAgent(decryptedProfile);
+
+	// Profile is fetched server-side via getFullUserData in routes/agent.js
+	// No need to send profile from extension
 
 	// Read agent-specific provider/model from storage
 	const { agentProvider, agentModelType } = await chrome.storage.local.get(['agentProvider', 'agentModelType']);
@@ -144,11 +114,11 @@ export async function executeAgentGoal(goal, startUrl, options = {}) {
 		agentSession.port,
 		goal,
 		startUrl,
-		agentProfile,
+		{},  // Empty profile; server merges from DB
 		{
 			...options,
-			provider: agentProvider || cfg.defaultAgentProvider || 'openai',
-			model: agentModelType || cfg.defaultAgentModel || 'gpt-5.2'
+			provider: agentProvider || cfg.defaultAgentProvider,
+			model: agentModelType || cfg.defaultAgentModel
 		}
 	);
 
@@ -166,7 +136,7 @@ export async function provideAgentInput(inputData) {
 		throw new Error('No active agent session');
 	}
 
-	// Save to site data
+	// Save to site data via server API
 	await saveSiteData(inputData);
 
 	// Pass provider/model so resumed sessions use the same LLM
@@ -177,8 +147,8 @@ export async function provideAgentInput(inputData) {
 		agentSession.port,
 		agentSession.sessionId,
 		inputData,
-		agentProvider || cfg.defaultAgentProvider || 'openai',
-		agentModelType || cfg.defaultAgentModel || 'gpt-5.2'
+		agentProvider || cfg.defaultAgentProvider,
+		agentModelType || cfg.defaultAgentModel
 	);
 
 	return result;
@@ -208,42 +178,41 @@ export function clearAgentSession() {
 }
 
 /**
- * Full cleanup - stop agent and lock profile
+ * Full cleanup - stop agent session
  */
 export async function cleanup() {
 	await stopAgentSession();
-	lockProfile();
 }
 
 /**
- * Save form data to profile's siteData
+ * Save form data to server site_data
  * @param {Object} formData - Key-value pairs to save
  */
 async function saveSiteData(formData) {
-	if (!currentAgentUrl || !currentPassphrase || !decryptedProfile) {
-		console.log('[Agent] Cannot save site data - missing URL, passphrase, or profile');
+	if (!currentAgentUrl) {
+		console.log('[Agent] Cannot save site data - no current URL');
 		return;
 	}
 
 	try {
 		const domain = extractDomain(currentAgentUrl);
+		const userId = getConfig()?.extension?.userId || 1;
 
-		if (!decryptedProfile.siteData) {
-			decryptedProfile.siteData = {};
-		}
-
-		if (!decryptedProfile.siteData[domain]) {
-			decryptedProfile.siteData[domain] = {};
-		}
-
-		for (const [key, value] of Object.entries(formData)) {
-			if (value && value.toString().trim()) {
-				decryptedProfile.siteData[domain][key] = value.toString().trim();
-			}
-		}
-
-		const encrypted = await encryptProfile(decryptedProfile, currentPassphrase);
-		await chrome.storage.local.set({ encryptedUserProfile: encrypted });
+		const promises = Object.entries(formData)
+			.filter(([, value]) => value && value.toString().trim())
+			.map(([key, value]) =>
+				fetch(`${SERVER_BASE}/api/db/site-data`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						userId,
+						domain,
+						fieldName: key,
+						fieldValue: value.toString().trim()
+					})
+				})
+			);
+		await Promise.all(promises);
 
 		console.log(`[Agent] Saved site data for ${domain}:`, Object.keys(formData));
 	} catch (error) {

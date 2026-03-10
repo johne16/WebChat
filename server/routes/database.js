@@ -3,6 +3,7 @@ import { Router } from "express";
 import {
 	getProfile,
 	upsertProfile,
+	deleteProfile,
 	updateProfileExtraField,
 	getSiteData,
 	upsertSiteData,
@@ -15,9 +16,9 @@ import {
 
 const router = Router();
 
-// Item 15: Helper to extract userId from request (query or body)
+// Hardcode until auth is implemented
 function getUserId(req) {
-	return parseInt(req.query.userId || req.body?.userId) || 1;
+	return 1;
 }
 
 // Item 15: Wraps a route handler with try/catch and standard error response
@@ -44,6 +45,13 @@ router.post("/api/db/profile", withErrorHandler("Update profile", (req, res) => 
 	const userId = getUserId(req);
 	const profile = upsertProfile(userId, req.body);
 	res.json({ profile });
+}));
+
+// DELETE /api/db/profile - Delete user profile
+router.delete("/api/db/profile", withErrorHandler("Delete profile", (req, res) => {
+	const userId = getUserId(req);
+	deleteProfile(userId);
+	res.json({ success: true });
 }));
 
 // POST /api/db/profile/extra - Update a single extra field
@@ -108,7 +116,8 @@ router.post("/api/db/learned", withErrorHandler("Add learned context", (req, res
 // DELETE /api/db/learned/:id - Delete learned context
 router.delete("/api/db/learned/:id", withErrorHandler("Delete learned context", (req, res) => {
 	const id = parseInt(req.params.id);
-	deleteLearnedContext(id);
+	const userId = getUserId(req);
+	deleteLearnedContext(id, userId);
 	res.json({ success: true });
 }));
 

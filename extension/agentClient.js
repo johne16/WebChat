@@ -40,32 +40,52 @@ export function connectSSE(handlers = {}) {
 	// Set up event listeners
 	eventSource.addEventListener('connected', (e) => {
 		console.log('[AgentClient] SSE connected');
-		const data = JSON.parse(e.data);
-		eventHandlers['connected'].forEach(h => h(data));
+		try {
+			const data = JSON.parse(e.data);
+			eventHandlers['connected'].forEach(h => h(data));
+		} catch (err) {
+			console.error('[AgentClient] Failed to parse SSE data:', err);
+		}
 	});
 
 	eventSource.addEventListener('state', (e) => {
-		const data = JSON.parse(e.data);
-		console.log('[AgentClient] SSE state:', data.agents?.length, 'agents,', data.needsInputQueue?.length, 'pending inputs');
-		eventHandlers['state'].forEach(h => h(data));
+		try {
+			const data = JSON.parse(e.data);
+			console.log('[AgentClient] SSE state:', data.agents?.length, 'agents,', data.needsInputQueue?.length, 'pending inputs');
+			eventHandlers['state'].forEach(h => h(data));
+		} catch (err) {
+			console.error('[AgentClient] Failed to parse SSE data:', err);
+		}
 	});
 
 	eventSource.addEventListener('agent-status', (e) => {
-		const data = JSON.parse(e.data);
-		console.log('[AgentClient] SSE agent-status:', data.status);
-		eventHandlers['agent-status'].forEach(h => h(data));
+		try {
+			const data = JSON.parse(e.data);
+			console.log('[AgentClient] SSE agent-status:', data.status);
+			eventHandlers['agent-status'].forEach(h => h(data));
+		} catch (err) {
+			console.error('[AgentClient] Failed to parse SSE data:', err);
+		}
 	});
 
 	eventSource.addEventListener('needs-input', (e) => {
-		const data = JSON.parse(e.data);
-		console.log('[AgentClient] SSE needs-input:', data.missingFields);
-		eventHandlers['needs-input'].forEach(h => h(data));
+		try {
+			const data = JSON.parse(e.data);
+			console.log('[AgentClient] SSE needs-input:', data.missingFields);
+			eventHandlers['needs-input'].forEach(h => h(data));
+		} catch (err) {
+			console.error('[AgentClient] Failed to parse SSE data:', err);
+		}
 	});
 
 	eventSource.addEventListener('input-provided', (e) => {
-		const data = JSON.parse(e.data);
-		console.log('[AgentClient] SSE input-provided');
-		eventHandlers['input-provided'].forEach(h => h(data));
+		try {
+			const data = JSON.parse(e.data);
+			console.log('[AgentClient] SSE input-provided');
+			eventHandlers['input-provided'].forEach(h => h(data));
+		} catch (err) {
+			console.error('[AgentClient] Failed to parse SSE data:', err);
+		}
 	});
 
 	eventSource.onerror = (err) => {

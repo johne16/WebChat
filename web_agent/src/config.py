@@ -44,10 +44,10 @@ class Config:
     """Configuration class for agent settings"""
 
     # Provider Configuration
-    PROVIDER: str = os.getenv("PROVIDER", _providers.get("default", "openai"))
+    PROVIDER: str = os.getenv("PROVIDER", _providers.get("default"))
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
-    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", _providers.get("defaultModel", "gpt-5.2"))
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", _providers.get("defaultModel"))
     TEMPERATURE: float = float(os.getenv("TEMPERATURE", str(_llm.get("temperature", 0.1))))
     MAX_TOKENS: int = int(os.getenv("MAX_TOKENS", str(_llm.get("maxTokens", 2000))))
 
@@ -92,6 +92,9 @@ class Config:
     RECENT_ACTION_LOOKBACK: int = int(
         os.getenv("RECENT_ACTION_LOOKBACK", str(_agent.get("recentActionLookback", 5)))
     )
+
+    # Session cleanup
+    SESSION_TTL_DAYS: int = int(os.getenv("SESSION_TTL_DAYS", str(_agent.get("sessionTtlDays", 7))))
 
     # Execution Engine
     MAX_CODE_LENGTH: int = int(os.getenv("MAX_CODE_LENGTH", str(_execution.get("maxCodeLength", 5000))))

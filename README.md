@@ -20,12 +20,14 @@ WebChat is a Chromium extension that adds an AI-powered side panel to help users
    OPENAI_API_KEY=your_openai_api_key_here
    ANTHROPIC_API_KEY=your_anthropic_api_key_here  # optional
    BRAVE_SEARCH_API_KEY=your_brave_search_api_key_here
+   DATABASE_ENCRYPTION_KEY=<generate with: openssl rand -hex 32>
    PORT=8787
    ```
 
    **Notes:**
    - Get your Brave Search API key from [https://brave.com/search/api/](https://brave.com/search/api/)
    - `ANTHROPIC_API_KEY` is only needed if you select an Anthropic model in settings
+   - `DATABASE_ENCRYPTION_KEY` encrypts sensitive profile data at rest in SQLite. Generate it once and keep it safe; losing this key makes existing data unrecoverable. The server will not start without it.
 
 3. Install server dependencies:
    ```bash
@@ -191,7 +193,6 @@ Profile data is encrypted with AES-256-GCM (PBKDF2, 100k iterations). Passphrase
 │   ├── agentClient.js         # Web agent API client + SSE
 │   ├── background.js          # Extension lifecycle, tab tracking
 │   ├── config.js              # Shared config (SERVER_BASE)
-│   ├── crypto.js              # AES-256-GCM encryption
 │   ├── icons/                 # Extension icons
 │   ├── intent.js              # Intent detection (heuristic + LLM)
 │   ├── llmClient.js           # LLM client (OpenAI + Anthropic) + ReAct functions

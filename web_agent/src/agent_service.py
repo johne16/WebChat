@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from fastapi import FastAPI, Request
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, List, Any
@@ -21,7 +20,7 @@ class AppConfig:
     """CLI configuration stored on app.state"""
     port: Optional[int] = None
     callback_url: Optional[str] = None
-    database_path: Optional[str] = None
+    webhook_token: Optional[str] = None
 
 class AgentManager:
     """Thread-safe manager for active agent instances"""
@@ -220,16 +219,15 @@ async def execute_goal(request: ExecuteGoalRequest, raw_request: Request):
     """
     # Create agent instance (with optional session resume)
     app_config: AppConfig = raw_request.app.state.app_config
-    db_path = Path(app_config.database_path) if app_config.database_path else None
 
     agent = AutonomousWebAgent(
         session_id=request.sessionId,
-        db_path=db_path,
         callback_url=app_config.callback_url,
         port=app_config.port,
         task_id=request.sessionId,  # Use sessionId as taskId for now
         provider=request.provider,
-        model=request.model
+        model=request.model,
+        webhook_token=app_config.webhook_token
     )
 
     # Convert UserProfile to dict
@@ -284,11 +282,13 @@ async def continue_session(session_id: str, request: ContinueSessionRequest, raw
         # Merge additional data into memory
         if request.additionalData:
             agent.memory.update_user_profile(request.additionalData)
+        # Get goal and start URL from active agent's memory
+        goal = agent.memory.goal
+        start_url = agent.memory.current_url or (agent.memory.visited_urls[-1] if agent.memory.visited_urls else "")
     else:
         # Load existing session to get goal and current URL
         app_config: AppConfig = raw_request.app.state.app_config
-        db_path = Path(app_config.database_path) if app_config.database_path else None
-        memory = SessionMemory(session_id, db_path=db_path)
+        memory = await SessionMemory.create(session_id)
 
         if not memory.goal:
             return ExecuteGoalResponse(
@@ -305,20 +305,20 @@ async def continue_session(session_id: str, request: ContinueSessionRequest, raw
                 errors=[ErrorDetail(type="session_not_found", message=f"Session {session_id} not found")]
             )
 
+        # Get goal and start URL from loaded memory before creating agent
+        goal = memory.goal
+        start_url = memory.current_url or (memory.visited_urls[-1] if memory.visited_urls else "")
+
         # Create new agent (browser was closed, will start fresh)
         agent = AutonomousWebAgent(
             session_id=session_id,
-            db_path=db_path,
             callback_url=app_config.callback_url,
             port=app_config.port,
             task_id=session_id,
             provider=request.provider,
-            model=request.model
+            model=request.model,
+            webhook_token=app_config.webhook_token
         )
-
-    # Get goal and start URL from agent's memory
-    goal = agent.memory.goal
-    start_url = agent.memory.current_url or (agent.memory.visited_urls[-1] if agent.memory.visited_urls else "")
 
     # Execute goal with additional data merged into stored profile
     result = await agent.execute_goal(
@@ -373,10 +373,10 @@ def parse_args():
         help="Callback URL for status updates (webhooks)"
     )
     parser.add_argument(
-        "--database-path",
+        "--webhook-token",
         type=str,
         default=None,
-        help="Path to SQLite database for session storage"
+        help="Authentication token for webhook requests"
     )
     return parser.parse_args()
 
@@ -390,7 +390,7 @@ if __name__ == "__main__":
     app.state.app_config = AppConfig(
         port=args.port,
         callback_url=args.callback_url,
-        database_path=args.database_path
+        webhook_token=args.webhook_token
     )
 
     # Determine port (CLI arg takes precedence over config)
@@ -402,8 +402,6 @@ if __name__ == "__main__":
     logger.info(f"OpenAI model: {config.OPENAI_MODEL}")
     if args.callback_url:
         logger.info(f"Callback URL: {args.callback_url}")
-    if args.database_path:
-        logger.info(f"Database path: {args.database_path}")
     logger.info(f"API Documentation: http://localhost:{port}/docs")
     logger.info(f"Health Check: http://localhost:{port}/health")
 

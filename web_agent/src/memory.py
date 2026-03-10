@@ -1,13 +1,14 @@
 """Session Memory - SQLite-backed persistent storage for agent sessions"""
 
 import json
-import sqlite3
+import logging
+import aiosqlite
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
-from src.config import GoalStatus
+from src.config import GoalStatus, config
 
 
 @dataclass
@@ -55,116 +56,153 @@ class SessionMemory:
         self._user_profile: Dict[str, Any] = {}
         self._missing_fields: List[str] = []
 
-        # Ensure database exists
-        self._init_db()
+        # Track the session_id passed to constructor for async init
+        self._init_session_id = session_id
+
+    @classmethod
+    async def create(cls, session_id: Optional[str] = None, db_path: Optional[Path] = None) -> "SessionMemory":
+        """Async factory method to create and initialize a SessionMemory instance
+
+        Args:
+            session_id: Existing session ID to load, or None for new session
+            db_path: Path to SQLite database, or None for default
+
+        Returns:
+            Initialized SessionMemory instance
+        """
+        instance = cls(session_id, db_path)
+        await instance.init()
+        return instance
+
+    async def init(self) -> None:
+        """Async initialization: set up database, clean old sessions, load existing session"""
+        await self._init_db()
+
+        # TTL cleanup: delete sessions older than configured days
+        await self._cleanup_old_sessions()
 
         # Load existing session if provided
-        if session_id:
-            self.load(session_id)
+        if self._init_session_id:
+            await self.load(self._init_session_id)
 
-    def _init_db(self) -> None:
+    async def _init_db(self) -> None:
         """Initialize database schema"""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        async with aiosqlite.connect(self.db_path) as conn:
+            # Sessions table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id TEXT PRIMARY KEY,
+                    goal TEXT,
+                    status TEXT,
+                    current_url TEXT,
+                    current_step INTEGER DEFAULT 0,
+                    created_at TIMESTAMP,
+                    updated_at TIMESTAMP
+                )
+            """)
 
-        # Sessions table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                session_id TEXT PRIMARY KEY,
-                goal TEXT,
-                status TEXT,
-                current_url TEXT,
-                current_step INTEGER DEFAULT 0,
-                created_at TIMESTAMP,
-                updated_at TIMESTAMP
+            # Key-value memory (entered_data, extracted_info, visited_urls)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS memory (
+                    session_id TEXT,
+                    key TEXT,
+                    value TEXT,
+                    PRIMARY KEY (session_id, key)
+                )
+            """)
+
+            # Action history
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS actions (
+                    session_id TEXT,
+                    step INTEGER,
+                    action_type TEXT,
+                    params TEXT,
+                    result TEXT,
+                    success INTEGER,
+                    timestamp TIMESTAMP,
+                    PRIMARY KEY (session_id, step)
+                )
+            """)
+
+            await conn.commit()
+
+    async def _cleanup_old_sessions(self) -> None:
+        """Delete sessions older than SESSION_TTL_DAYS"""
+        ttl_days = config.SESSION_TTL_DAYS
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                "DELETE FROM actions WHERE session_id IN (SELECT session_id FROM sessions WHERE created_at < datetime('now', ?))",
+                (f'-{ttl_days} days',)
             )
-        """)
-
-        # Key-value memory (entered_data, extracted_info, visited_urls)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS memory (
-                session_id TEXT,
-                key TEXT,
-                value TEXT,
-                PRIMARY KEY (session_id, key)
+            await conn.execute(
+                "DELETE FROM memory WHERE session_id IN (SELECT session_id FROM sessions WHERE created_at < datetime('now', ?))",
+                (f'-{ttl_days} days',)
             )
-        """)
-
-        # Action history
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS actions (
-                session_id TEXT,
-                step INTEGER,
-                action_type TEXT,
-                params TEXT,
-                result TEXT,
-                success INTEGER,
-                timestamp TIMESTAMP,
-                PRIMARY KEY (session_id, step)
+            cursor = await conn.execute(
+                "DELETE FROM sessions WHERE created_at < datetime('now', ?)",
+                (f'-{ttl_days} days',)
             )
-        """)
+            deleted = cursor.rowcount
+            await conn.commit()
+        if deleted > 0:
+            logging.getLogger(__name__).info(f"Cleaned up {deleted} sessions older than {ttl_days} days")
 
-        conn.commit()
-        conn.close()
-
-    def save(self) -> None:
+    async def save(self) -> None:
         """Persist current state to database"""
         self.updated_at = datetime.now()
 
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        # Upsert session
-        cursor.execute("""
-            INSERT OR REPLACE INTO sessions
-            (session_id, goal, status, current_url, current_step, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            self.session_id,
-            self.goal,
-            self.status,
-            self.current_url,
-            self.current_step,
-            self.created_at.isoformat(),
-            self.updated_at.isoformat()
-        ))
-
-        # Save memory entries
-        memory_entries = {
-            "entered_data": self._entered_data,
-            "extracted_info": self._extracted_info,
-            "visited_urls": self._visited_urls,
-            "user_profile": self._user_profile,
-            "missing_fields": self._missing_fields,
-        }
-        for key, value in memory_entries.items():
-            cursor.execute("""
-                INSERT OR REPLACE INTO memory (session_id, key, value)
-                VALUES (?, ?, ?)
-            """, (self.session_id, key, json.dumps(value)))
-
-        # Save action history
-        for action in self._action_history:
-            cursor.execute("""
-                INSERT OR REPLACE INTO actions
-                (session_id, step, action_type, params, result, success, timestamp)
+        async with aiosqlite.connect(self.db_path) as conn:
+            # Upsert session
+            await conn.execute("""
+                INSERT OR REPLACE INTO sessions
+                (session_id, goal, status, current_url, current_step, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 self.session_id,
-                action.step,
-                action.action_type,
-                json.dumps(action.params),
-                json.dumps(action.result),
-                1 if action.success else 0,
-                action.timestamp.isoformat()
+                self.goal,
+                self.status,
+                self.current_url,
+                self.current_step,
+                self.created_at.isoformat(),
+                self.updated_at.isoformat()
             ))
 
-        conn.commit()
-        conn.close()
+            # Save memory entries
+            memory_entries = {
+                "entered_data": self._entered_data,
+                "extracted_info": self._extracted_info,
+                "visited_urls": self._visited_urls,
+                "user_profile": self._user_profile,
+                "missing_fields": self._missing_fields,
+            }
+            for key, value in memory_entries.items():
+                await conn.execute("""
+                    INSERT OR REPLACE INTO memory (session_id, key, value)
+                    VALUES (?, ?, ?)
+                """, (self.session_id, key, json.dumps(value)))
 
-    def load(self, session_id: str) -> bool:
+            # Save action history
+            for action in self._action_history:
+                await conn.execute("""
+                    INSERT OR REPLACE INTO actions
+                    (session_id, step, action_type, params, result, success, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    self.session_id,
+                    action.step,
+                    action.action_type,
+                    json.dumps(action.params),
+                    json.dumps(action.result),
+                    1 if action.success else 0,
+                    action.timestamp.isoformat()
+                ))
+
+            await conn.commit()
+
+    async def load(self, session_id: str) -> bool:
         """Load session from database
 
         Args:
@@ -173,63 +211,59 @@ class SessionMemory:
         Returns:
             True if session found and loaded, False otherwise
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        async with aiosqlite.connect(self.db_path) as conn:
+            # Load session
+            cursor = await conn.execute("""
+                SELECT goal, status, current_url, current_step, created_at, updated_at
+                FROM sessions WHERE session_id = ?
+            """, (session_id,))
 
-        # Load session
-        cursor.execute("""
-            SELECT goal, status, current_url, current_step, created_at, updated_at
-            FROM sessions WHERE session_id = ?
-        """, (session_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return False
 
-        row = cursor.fetchone()
-        if not row:
-            conn.close()
-            return False
+            self.session_id = session_id
+            self.goal = row[0] or ""
+            self.status = row[1] or GoalStatus.IN_PROGRESS
+            self.current_url = row[2] or ""
+            self.current_step = row[3] or 0
+            self.created_at = datetime.fromisoformat(row[4]) if row[4] else datetime.now()
+            self.updated_at = datetime.fromisoformat(row[5]) if row[5] else datetime.now()
 
-        self.session_id = session_id
-        self.goal = row[0] or ""
-        self.status = row[1] or GoalStatus.IN_PROGRESS
-        self.current_url = row[2] or ""
-        self.current_step = row[3] or 0
-        self.created_at = datetime.fromisoformat(row[4]) if row[4] else datetime.now()
-        self.updated_at = datetime.fromisoformat(row[5]) if row[5] else datetime.now()
+            # Load memory entries
+            cursor = await conn.execute("""
+                SELECT key, value FROM memory WHERE session_id = ?
+            """, (session_id,))
 
-        # Load memory entries
-        cursor.execute("""
-            SELECT key, value FROM memory WHERE session_id = ?
-        """, (session_id,))
+            for key, value in await cursor.fetchall():
+                if key == "entered_data":
+                    self._entered_data = json.loads(value) if value else {}
+                elif key == "extracted_info":
+                    self._extracted_info = json.loads(value) if value else {}
+                elif key == "visited_urls":
+                    self._visited_urls = json.loads(value) if value else []
+                elif key == "user_profile":
+                    self._user_profile = json.loads(value) if value else {}
+                elif key == "missing_fields":
+                    self._missing_fields = json.loads(value) if value else []
 
-        for key, value in cursor.fetchall():
-            if key == "entered_data":
-                self._entered_data = json.loads(value) if value else {}
-            elif key == "extracted_info":
-                self._extracted_info = json.loads(value) if value else {}
-            elif key == "visited_urls":
-                self._visited_urls = json.loads(value) if value else []
-            elif key == "user_profile":
-                self._user_profile = json.loads(value) if value else {}
-            elif key == "missing_fields":
-                self._missing_fields = json.loads(value) if value else []
+            # Load action history
+            cursor = await conn.execute("""
+                SELECT step, action_type, params, result, success, timestamp
+                FROM actions WHERE session_id = ? ORDER BY step
+            """, (session_id,))
 
-        # Load action history
-        cursor.execute("""
-            SELECT step, action_type, params, result, success, timestamp
-            FROM actions WHERE session_id = ? ORDER BY step
-        """, (session_id,))
+            self._action_history = []
+            for row in await cursor.fetchall():
+                self._action_history.append(ActionRecord(
+                    step=row[0],
+                    action_type=row[1],
+                    params=json.loads(row[2]) if row[2] else {},
+                    success=bool(row[4]),
+                    result=json.loads(row[3]) if row[3] else {},
+                    timestamp=datetime.fromisoformat(row[5]) if row[5] else datetime.now()
+                ))
 
-        self._action_history = []
-        for row in cursor.fetchall():
-            self._action_history.append(ActionRecord(
-                step=row[0],
-                action_type=row[1],
-                params=json.loads(row[2]) if row[2] else {},
-                success=bool(row[4]),
-                result=json.loads(row[3]) if row[3] else {},
-                timestamp=datetime.fromisoformat(row[5]) if row[5] else datetime.now()
-            ))
-
-        conn.close()
         return True
 
     def remember(self, key: str, value: str) -> None:

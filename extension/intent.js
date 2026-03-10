@@ -8,7 +8,7 @@ import { getConfig } from './config.js';
 // Intent detection uses a small, cheap model regardless of user's model selection.
 // Read from config at call time (not module init) so loadConfig() has completed.
 function getIntentModel() { return getConfig()?.providers?.intentModel || 'gpt-4o-mini'; }
-function getIntentProvider() { return getConfig()?.providers?.intentProvider || 'openai'; }
+function getIntentProvider() { return getConfig()?.providers?.intentProvider; }
 
 // Action verbs that indicate agent tasks (single source of truth)
 const ACTION_VERB_PATTERN = /(sign up|signup|sign me up|register|fill out|fill in|apply|book|order|buy|purchase|create account|log in|login|submit|enroll|subscribe|checkout|check out)/;

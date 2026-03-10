@@ -84,17 +84,17 @@ export function updateHeaderProgress(text) {
 	} else {
 		headerProgress.classList.remove('visible');
 		// Hide element after fade-out transition
+		const fallbackTimer = setTimeout(() => {
+			headerProgress.hidden = true;
+			headerProgress.textContent = '';
+		}, 300);
 		const onEnd = () => {
+			clearTimeout(fallbackTimer);
 			headerProgress.hidden = true;
 			headerProgress.textContent = '';
 			headerProgress.removeEventListener('transitionend', onEnd);
 		};
 		headerProgress.addEventListener('transitionend', onEnd);
-		// Fallback if transition doesn't fire (already hidden, etc.)
-		setTimeout(() => {
-			headerProgress.hidden = true;
-			headerProgress.textContent = '';
-		}, 300);
 	}
 }
 
@@ -222,56 +222,6 @@ export function addMetaMessage(text) {
 	meta.className = 'meta';
 	meta.textContent = text;
 	log.appendChild(meta);
-}
-
-// =============================================================================
-// Password Modal
-// =============================================================================
-
-const passwordModal = document.getElementById('password-modal');
-const modalPassphrase = document.getElementById('modal-passphrase');
-const modalCancel = document.getElementById('modal-cancel');
-const modalSubmit = document.getElementById('modal-submit');
-
-/**
- * Show the password modal and focus the input
- */
-export function showPasswordModal() {
-	passwordModal.classList.add('visible');
-	modalPassphrase.value = '';
-	modalPassphrase.focus();
-}
-
-/**
- * Hide the password modal and clear the input
- */
-export function hidePasswordModal() {
-	passwordModal.classList.remove('visible');
-	modalPassphrase.value = '';
-}
-
-/**
- * Register callbacks for password modal interactions
- * @param {Object} callbacks - { onSubmit, onCancel }
- */
-export function onPasswordModal({ onSubmit, onCancel }) {
-	modalCancel.addEventListener('click', () => {
-		hidePasswordModal();
-		if (onCancel) onCancel();
-	});
-
-	modalSubmit.addEventListener('click', async () => {
-		const passphrase = modalPassphrase.value;
-		if (!passphrase) return;
-		if (onSubmit) await onSubmit(passphrase);
-	});
-
-	modalPassphrase.addEventListener('keydown', (e) => {
-		if (e.key === 'Enter') {
-			e.preventDefault();
-			modalSubmit.click();
-		}
-	});
 }
 
 // =============================================================================

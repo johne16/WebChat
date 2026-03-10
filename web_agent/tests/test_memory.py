@@ -1,7 +1,6 @@
 """Tests for memory.py - SQLite session memory"""
 
 import pytest
-import sqlite3
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -31,16 +30,17 @@ class TestSessionMemory:
         assert memory.status == "in_progress"  # GoalStatus.IN_PROGRESS == "in_progress"
         assert memory.current_step == 0
 
-    def test_create_session_with_id(self, temp_db):
+    @pytest.mark.asyncio
+    async def test_create_session_with_id(self, temp_db):
         """Test creating session with existing ID"""
         # First create and save a session
-        memory1 = SessionMemory()
+        memory1 = await SessionMemory.create()
         memory1.goal = "Test goal"
         memory1.remember("email", "test@example.com")
-        memory1.save()
+        await memory1.save()
 
         # Load it with same ID
-        memory2 = SessionMemory(session_id=memory1.session_id)
+        memory2 = await SessionMemory.create(session_id=memory1.session_id)
 
         assert memory2.session_id == memory1.session_id
         assert memory2.goal == "Test goal"
@@ -114,9 +114,10 @@ class TestSessionMemory:
         assert last.action_type == "click_link"
         assert last.step == 2
 
-    def test_save_and_load(self, temp_db):
+    @pytest.mark.asyncio
+    async def test_save_and_load(self, temp_db):
         """Test persistence to SQLite"""
-        memory = SessionMemory()
+        memory = await SessionMemory.create()
         memory.goal = "Sign up and sign in"
         memory.status = "achieved"
         memory.current_url = "http://example.com/dashboard"
@@ -130,10 +131,10 @@ class TestSessionMemory:
             success=True
         )
         memory.add_action(action)
-        memory.save()
+        await memory.save()
 
         # Create new instance and load
-        memory2 = SessionMemory(session_id=memory.session_id)
+        memory2 = await SessionMemory.create(session_id=memory.session_id)
 
         assert memory2.goal == "Sign up and sign in"
         assert memory2.status == "achieved"
@@ -142,10 +143,11 @@ class TestSessionMemory:
         assert "http://example.com/signup" in memory2.visited_urls
         assert len(memory2.action_history) == 1
 
-    def test_load_nonexistent_session(self, temp_db):
+    @pytest.mark.asyncio
+    async def test_load_nonexistent_session(self, temp_db):
         """Test loading non-existent session returns False"""
-        memory = SessionMemory()
-        result = memory.load("nonexistent-session-id")
+        memory = await SessionMemory.create()
+        result = await memory.load("nonexistent-session-id")
 
         assert result is False
 
@@ -250,26 +252,28 @@ class TestSessionMemory:
 
         assert memory.missing_fields == []
 
-    def test_user_profile_persists_to_db(self, temp_db):
+    @pytest.mark.asyncio
+    async def test_user_profile_persists_to_db(self, temp_db):
         """Test user profile is saved and loaded from database"""
-        memory = SessionMemory()
+        memory = await SessionMemory.create()
         memory.set_user_profile({"firstName": "John", "email": "john@example.com"})
-        memory.save()
+        await memory.save()
 
         # Load in new instance
-        memory2 = SessionMemory(session_id=memory.session_id)
+        memory2 = await SessionMemory.create(session_id=memory.session_id)
 
         assert memory2.user_profile["firstName"] == "John"
         assert memory2.user_profile["email"] == "john@example.com"
 
-    def test_missing_fields_persists_to_db(self, temp_db):
+    @pytest.mark.asyncio
+    async def test_missing_fields_persists_to_db(self, temp_db):
         """Test missing fields is saved and loaded from database"""
-        memory = SessionMemory()
+        memory = await SessionMemory.create()
         memory.set_missing_fields(["birthCity", "securityAnswer"])
-        memory.save()
+        await memory.save()
 
         # Load in new instance
-        memory2 = SessionMemory(session_id=memory.session_id)
+        memory2 = await SessionMemory.create(session_id=memory.session_id)
 
         assert memory2.missing_fields == ["birthCity", "securityAnswer"]
 

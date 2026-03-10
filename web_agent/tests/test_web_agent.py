@@ -301,15 +301,17 @@ class TestAutonomousWebAgent:
         self, temp_db, mock_config, mock_browser, mock_llm, mock_action_executor
     ):
         """Test resuming existing session"""
-        # Create initial session
-        agent1 = AutonomousWebAgent()
-        agent1.memory.goal = "Sign up"
-        agent1.memory.remember("email", "saved@example.com")
-        agent1.memory.save()
-        session_id = agent1.memory.session_id
+        # Create initial session with async memory
+        memory1 = await SessionMemory.create()
+        memory1.goal = "Sign up"
+        memory1.remember("email", "saved@example.com")
+        await memory1.save()
+        session_id = memory1.session_id
 
-        # Resume session
+        # Resume session - memory is initialized lazily in execute_goal,
+        # so manually create and assign it for this test
         agent2 = AutonomousWebAgent(session_id=session_id)
+        agent2.memory = await SessionMemory.create(session_id=session_id)
 
         assert agent2.memory.session_id == session_id
         assert agent2.memory.recall("email") == "saved@example.com"

@@ -1,6 +1,6 @@
 // routes/proxy.js - LLM, Crawl4AI, and Brave Search proxy endpoints
 import { Router } from "express";
-import { appConfig } from "../config.js";
+import { appConfig, PROVIDER } from "../config.js";
 import { getHistory, addMessage } from "../conversationHistory.js";
 import { chat as openaiChat } from "../providers/openai.js";
 import { chat as anthropicChat } from "../providers/anthropic.js";
@@ -17,17 +17,18 @@ const providers = {
 // LLM chat endpoint (supports OpenAI and Anthropic via provider field)
 router.post("/api/llm/chat", async (req, res) => {
 	try {
-		const { model, messages, provider = "openai", userId = 1, storeInHistory = false, flow } = req.body;
-		console.log("[LLM] Request received - provider:", provider, "model:", model, "messages:", messages?.length);
+		const { model, messages, provider, userId = 1, storeInHistory = false, flow } = req.body;
+		const effectiveProvider = provider || PROVIDER;
+		console.log("[LLM] Request received - provider:", effectiveProvider, "model:", model, "messages:", messages?.length);
 
 		if (!model || !messages) {
 			console.log("[LLM] Error: Missing model or messages");
 			return res.status(400).json({ error: "Missing model or messages" });
 		}
 
-		const chatFn = providers[provider];
+		const chatFn = providers[effectiveProvider];
 		if (!chatFn) {
-			return res.status(400).json({ error: `Unknown provider: ${provider}` });
+			return res.status(400).json({ error: `Unknown provider: ${effectiveProvider}` });
 		}
 
 		// Build augmented messages: insert history after system messages
@@ -46,7 +47,7 @@ router.post("/api/llm/chat", async (req, res) => {
 			...messages.slice(systemEnd)
 		];
 
-		console.log("[LLM] Calling", provider, "API... (history:", history.length, "messages injected)");
+		console.log("[LLM] Calling", effectiveProvider, "API... (history:", history.length, "messages injected)");
 		const startTime = Date.now();
 		const result = await chatFn(model, augmented);
 		const turnaroundMs = Date.now() - startTime;
@@ -57,7 +58,7 @@ router.post("/api/llm/chat", async (req, res) => {
 			scope: "server",
 			timestamp: new Date().toISOString(),
 			flow: flow || "unknown",
-			provider,
+			provider: effectiveProvider,
 			model,
 			turnaroundMs,
 			tokens: result.usage
@@ -87,6 +88,9 @@ router.post("/api/llm/chat", async (req, res) => {
 router.post("/api/history/add", async (req, res) => {
 	try {
 		const { userId = 1, messages } = req.body;
+		if (!Array.isArray(messages)) {
+			return res.status(400).json({ error: "Missing or invalid messages array" });
+		}
 		for (const msg of messages) {
 			addMessage(userId, msg.role, msg.content);
 		}

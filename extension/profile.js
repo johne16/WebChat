@@ -1,77 +1,35 @@
 // extension/profile.js
-// Profile management page logic
+// Profile management page logic - uses server API
 
-import { encryptProfile, decryptProfile } from './crypto.js';
 import { formatFieldLabel } from './ui.js';
-import { getConfig, loadConfig } from './config.js';
+import { getConfig, loadConfig, SERVER_BASE } from './config.js';
 
 // Load config from server (profile.html is a standalone page)
 await loadConfig();
 
-const MIN_PASSPHRASE_LENGTH = getConfig()?.extension?.profile?.minPassphraseLength || 4;
+const USER_ID = getConfig()?.extension?.userId || 1;
 
 // DOM elements
-const statusEl = document.getElementById('status');
 const messageEl = document.getElementById('message');
-const unlockSection = document.getElementById('unlock-section');
-const createSection = document.getElementById('create-section');
 const profileSection = document.getElementById('profile-section');
 const siteDataSection = document.getElementById('site-data-section');
 const siteDataContainer = document.getElementById('site-data-container');
-const passphraseSection = document.getElementById('passphrase-section');
 const dangerSection = document.getElementById('danger-section');
-const unlockForm = document.getElementById('unlock-form');
-const createForm = document.getElementById('create-form');
 const profileForm = document.getElementById('profile-form');
-const changePassphraseForm = document.getElementById('change-passphrase-form');
-const passphraseInput = document.getElementById('passphrase');
-const createPassphraseInput = document.getElementById('create-passphrase');
-const confirmPassphraseInput = document.getElementById('confirm-passphrase');
-const lockBtn = document.getElementById('lock-btn');
 const deleteProfileBtn = document.getElementById('delete-profile-btn');
 const dynamicFieldsContainer = document.getElementById('dynamic-fields');
 
 // State
-let currentPassphrase = null;
-let currentProfile = null; // Keep track of full profile including siteData
+let currentProfile = null;
 
-// Profile field names (standard fields)
+// Profile field names (standard fields in DB use snake_case)
 const STANDARD_FIELDS = [
-	'firstName', 'lastName', 'email', 'phone',
-	'address', 'city', 'state', 'zip', 'country', 'birthDate'
+	'first_name', 'last_name', 'email', 'phone',
+	'street', 'city', 'state', 'zip', 'country', 'birth_date'
 ];
 
 // Fields to mask in the site data display
 const SENSITIVE_FIELDS = ['password', 'secret', 'token', 'key', 'pin', 'cvv', 'ssn'];
-
-// Validate passphrase for create/change flows
-function validatePassphrase(passphrase, confirmPassphrase) {
-	if (!passphrase) {
-		return { valid: false, error: 'Please enter a passphrase' };
-	}
-	if (passphrase !== confirmPassphrase) {
-		return { valid: false, error: 'Passphrases do not match' };
-	}
-	if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
-		return { valid: false, error: `Passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters` };
-	}
-	return { valid: true, error: null };
-}
-
-// Initialize
-async function init() {
-	const { encryptedUserProfile } = await chrome.storage.local.get('encryptedUserProfile');
-
-	if (encryptedUserProfile) {
-		// Existing profile - show unlock form
-		unlockSection.hidden = false;
-		createSection.hidden = true;
-	} else {
-		// No profile - show create form
-		unlockSection.hidden = true;
-		createSection.hidden = false;
-	}
-}
 
 // Show message
 function showMessage(text, type = 'error') {
@@ -82,60 +40,32 @@ function showMessage(text, type = 'error') {
 	}, 5000);
 }
 
-// Create new profile
-createForm.addEventListener('submit', async (e) => {
-	e.preventDefault();
-
-	const passphrase = createPassphraseInput.value;
-	const confirmPassphrase = confirmPassphraseInput.value;
-
-	const result = validatePassphrase(passphrase, confirmPassphrase);
-	if (!result.valid) {
-		showMessage(result.error);
-		return;
-	}
-
-	currentPassphrase = passphrase;
-	unlockSuccess({});
-	showMessage('Profile created. Fill in your information and save.', 'success');
-});
-
-// Unlock existing profile
-unlockForm.addEventListener('submit', async (e) => {
-	e.preventDefault();
-	const passphrase = passphraseInput.value;
-
-	if (!passphrase) {
-		showMessage('Please enter a passphrase');
-		return;
-	}
-
+// Initialize: load profile from server
+async function init() {
 	try {
-		const { encryptedUserProfile } = await chrome.storage.local.get('encryptedUserProfile');
-		const profile = await decryptProfile(encryptedUserProfile, passphrase);
-		currentPassphrase = passphrase;
-		unlockSuccess(profile);
+		const res = await fetch(`${SERVER_BASE}/api/db/profile?userId=${USER_ID}`);
+		if (!res.ok) throw new Error('Failed to load profile');
+		const data = await res.json();
+		currentProfile = data.profile || {};
+
+		// Show all sections immediately (no unlock needed)
+		profileSection.hidden = false;
+		siteDataSection.hidden = false;
+		dangerSection.hidden = false;
+
+		populateForm(currentProfile);
+		await loadSiteData();
 	} catch (error) {
-		console.error('Unlock error:', error);
-		showMessage('Incorrect passphrase. Please try again.');
+		console.error('Init error:', error);
+		showMessage('Failed to connect to server. Is it running?');
+		// Still show form for new profile
+		profileSection.hidden = false;
+		dangerSection.hidden = false;
 	}
-});
+}
 
-// Handle successful unlock
-function unlockSuccess(profile) {
-	currentProfile = profile;
-
-	// Update UI state
-	statusEl.textContent = 'Unlocked';
-	statusEl.className = 'status unlocked';
-	unlockSection.hidden = true;
-	createSection.hidden = true;
-	profileSection.hidden = false;
-	siteDataSection.hidden = false;
-	passphraseSection.hidden = false;
-	dangerSection.hidden = false;
-
-	// Populate standard fields
+// Populate form with profile data
+function populateForm(profile) {
 	STANDARD_FIELDS.forEach(field => {
 		const input = document.getElementById(field);
 		if (input && profile[field]) {
@@ -143,22 +73,15 @@ function unlockSuccess(profile) {
 		}
 	});
 
-	// Populate dynamic fields (excluding siteData)
-	renderDynamicFields(profile);
-
-	// Render site-specific data
-	renderSiteData(profile.siteData || {});
+	// Populate dynamic fields from extra_fields
+	renderDynamicFields(profile.extra_fields || {});
 }
 
-// Render dynamic fields (fields not in STANDARD_FIELDS, excluding siteData)
-function renderDynamicFields(profile) {
+// Render dynamic fields
+function renderDynamicFields(extraFields) {
 	dynamicFieldsContainer.innerHTML = '';
-
-	const dynamicKeys = Object.keys(profile).filter(
-		key => !STANDARD_FIELDS.includes(key) && key !== 'siteData'
-	);
-
-	if (dynamicKeys.length === 0) return;
+	const keys = Object.keys(extraFields);
+	if (keys.length === 0) return;
 
 	const header = document.createElement('h3');
 	header.textContent = 'Additional Fields';
@@ -167,7 +90,7 @@ function renderDynamicFields(profile) {
 	header.style.fontSize = '14px';
 	dynamicFieldsContainer.appendChild(header);
 
-	dynamicKeys.forEach(key => {
+	keys.forEach(key => {
 		const row = document.createElement('div');
 		row.className = 'form-row';
 
@@ -178,8 +101,8 @@ function renderDynamicFields(profile) {
 		const input = document.createElement('input');
 		input.type = 'text';
 		input.id = `dynamic-${key}`;
-		input.name = key;
-		input.value = profile[key] || '';
+		input.name = `extra_${key}`;
+		input.value = extraFields[key] || '';
 
 		row.appendChild(label);
 		row.appendChild(input);
@@ -187,7 +110,7 @@ function renderDynamicFields(profile) {
 	});
 }
 
-// Small DOM helper to reduce createElement boilerplate
+// Small DOM helper
 function el(tag, className, text) {
 	const node = document.createElement(tag);
 	if (className) node.className = className;
@@ -195,10 +118,28 @@ function el(tag, className, text) {
 	return node;
 }
 
-// Check if a field name is sensitive
 function isSensitiveField(fieldName) {
 	const lower = fieldName.toLowerCase();
 	return SENSITIVE_FIELDS.some(s => lower.includes(s));
+}
+
+// Load and render site data from server
+async function loadSiteData() {
+	try {
+		const res = await fetch(`${SERVER_BASE}/api/db/site-data?userId=${USER_ID}`);
+		if (!res.ok) return;
+		const data = await res.json();
+
+		// Group by domain
+		const grouped = {};
+		for (const item of (data.siteData || [])) {
+			if (!grouped[item.domain]) grouped[item.domain] = {};
+			grouped[item.domain][item.field_name] = item.field_value;
+		}
+		renderSiteData(grouped);
+	} catch (error) {
+		console.error('Load site data error:', error);
+	}
 }
 
 // Render site-specific data
@@ -215,14 +156,15 @@ function renderSiteData(siteData) {
 		const fields = siteData[site];
 		const siteItem = el('div', 'site-item');
 
-		// Site header (clickable to expand)
 		const siteHeader = el('div', 'site-header');
-
 		const siteName = el('span', 'site-name');
-		siteName.innerHTML = `<span class="chevron">▶</span> ${site}`;
+		const chevron = document.createElement('span');
+		chevron.className = 'chevron';
+		chevron.innerHTML = '&#9654;';
+		siteName.appendChild(chevron);
+		siteName.appendChild(document.createTextNode(` ${site}`));
 
 		const siteActions = el('div', 'site-actions');
-
 		const deleteSiteBtn = el('button', 'btn-icon delete', '\uD83D\uDDD1\uFE0F');
 		deleteSiteBtn.type = 'button';
 		deleteSiteBtn.title = 'Delete all data for this site';
@@ -234,15 +176,11 @@ function renderSiteData(siteData) {
 		siteActions.appendChild(deleteSiteBtn);
 		siteHeader.appendChild(siteName);
 		siteHeader.appendChild(siteActions);
-
-		// Toggle expand on header click
 		siteHeader.addEventListener('click', () => {
 			siteItem.classList.toggle('expanded');
 		});
 
-		// Site fields container
 		const siteFields = el('div', 'site-fields');
-
 		Object.keys(fields).forEach(fieldName => {
 			const fieldValue = fields[fieldName];
 			const fieldItem = el('div', 'field-item');
@@ -280,19 +218,18 @@ function renderSiteData(siteData) {
 
 // Delete a single field from a site
 async function deleteField(site, fieldName) {
-	if (!currentProfile.siteData || !currentProfile.siteData[site]) return;
-
-	delete currentProfile.siteData[site][fieldName];
-
-	// If no more fields for this site, remove the site entirely
-	if (Object.keys(currentProfile.siteData[site]).length === 0) {
-		delete currentProfile.siteData[site];
+	try {
+		await fetch(`${SERVER_BASE}/api/db/site-data`, {
+			method: 'DELETE',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ userId: USER_ID, domain: site, fieldName })
+		});
+		await loadSiteData();
+		showMessage(`Deleted "${formatFieldLabel(fieldName)}" from ${site}`, 'success');
+	} catch (error) {
+		console.error('Delete field error:', error);
+		showMessage('Failed to delete field.');
 	}
-
-	// Save and re-render
-	await saveProfile();
-	renderSiteData(currentProfile.siteData || {});
-	showMessage(`Deleted "${formatFieldLabel(fieldName)}" from ${site}`, 'success');
 }
 
 // Delete all data for a site
@@ -300,131 +237,56 @@ async function deleteSite(site) {
 	const confirmed = confirm(`Delete all saved data for ${site}?`);
 	if (!confirmed) return;
 
-	if (!currentProfile.siteData) return;
-
-	delete currentProfile.siteData[site];
-
-	// Save and re-render
-	await saveProfile();
-	renderSiteData(currentProfile.siteData || {});
-	showMessage(`Deleted all data for ${site}`, 'success');
-}
-
-// Helper to save the current profile
-async function saveProfile() {
-	if (!currentPassphrase) return;
-
-	// Collect form data for standard/dynamic fields
-	const formData = new FormData(profileForm);
-	const profile = {};
-
-	for (const [key, value] of formData.entries()) {
-		if (value.trim()) {
-			profile[key] = value.trim();
-		}
+	try {
+		await fetch(`${SERVER_BASE}/api/db/site-data`, {
+			method: 'DELETE',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ userId: USER_ID, domain: site })
+		});
+		await loadSiteData();
+		showMessage(`Deleted all data for ${site}`, 'success');
+	} catch (error) {
+		console.error('Delete site error:', error);
+		showMessage('Failed to delete site data.');
 	}
-
-	// Preserve siteData
-	if (currentProfile.siteData && Object.keys(currentProfile.siteData).length > 0) {
-		profile.siteData = currentProfile.siteData;
-	}
-
-	currentProfile = profile;
-
-	const encrypted = await encryptProfile(profile, currentPassphrase);
-	await chrome.storage.local.set({ encryptedUserProfile: encrypted });
 }
 
 // Save profile (form submit)
 profileForm.addEventListener('submit', async (e) => {
 	e.preventDefault();
 
-	if (!currentPassphrase) {
-		showMessage('Profile is locked. Please unlock first.');
-		return;
-	}
-
 	try {
-		await saveProfile();
+		const formData = new FormData(profileForm);
+		const profile = {};
+		const extraFields = {};
+
+		for (const [key, value] of formData.entries()) {
+			if (key.startsWith('extra_')) {
+				const extraKey = key.slice(6);
+				if (value.trim()) extraFields[extraKey] = value.trim();
+			} else if (value.trim()) {
+				profile[key] = value.trim();
+			}
+		}
+
+		if (Object.keys(extraFields).length > 0) {
+			profile.extra_fields = extraFields;
+		}
+
+		const res = await fetch(`${SERVER_BASE}/api/db/profile`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ userId: USER_ID, ...profile })
+		});
+
+		if (!res.ok) throw new Error('Save failed');
+
+		const data = await res.json();
+		currentProfile = data.profile;
 		showMessage('Profile saved successfully!', 'success');
 	} catch (error) {
 		console.error('Save error:', error);
-		showMessage('Failed to save profile. Please try again.');
-	}
-});
-
-// Lock profile
-lockBtn.addEventListener('click', () => {
-	currentPassphrase = null;
-	currentProfile = null;
-
-	// Clear forms
-	profileForm.reset();
-	changePassphraseForm.reset();
-	dynamicFieldsContainer.innerHTML = '';
-	siteDataContainer.innerHTML = '<p class="empty-state">No site data saved yet.</p>';
-
-	// Update UI
-	statusEl.textContent = 'Locked';
-	statusEl.className = 'status locked';
-	unlockSection.hidden = false;
-	createSection.hidden = true;
-	profileSection.hidden = true;
-	siteDataSection.hidden = true;
-	passphraseSection.hidden = true;
-	dangerSection.hidden = true;
-	passphraseInput.value = '';
-
-	showMessage('Profile locked.', 'success');
-});
-
-// Change passphrase
-changePassphraseForm.addEventListener('submit', async (e) => {
-	e.preventDefault();
-
-	const oldPassphrase = document.getElementById('oldPassphrase').value;
-	const newPassphrase = document.getElementById('newPassphrase').value;
-	const confirmPassphrase = document.getElementById('confirmPassphrase').value;
-
-	if (!oldPassphrase) {
-		showMessage('Please fill in all passphrase fields.');
-		return;
-	}
-
-	const result = validatePassphrase(newPassphrase, confirmPassphrase);
-	if (!result.valid) {
-		showMessage(result.error);
-		return;
-	}
-
-	// Verify old passphrase by attempting to decrypt
-	try {
-		const { encryptedUserProfile } = await chrome.storage.local.get('encryptedUserProfile');
-
-		if (encryptedUserProfile) {
-			await decryptProfile(encryptedUserProfile, oldPassphrase);
-		} else if (oldPassphrase !== currentPassphrase) {
-			throw new Error('Incorrect passphrase');
-		}
-	} catch (error) {
-		console.error('Old passphrase verification failed:', error);
-		showMessage('Current passphrase is incorrect.');
-		return;
-	}
-
-	try {
-		// Re-encrypt with new passphrase (preserving siteData)
-		await saveProfile(); // Ensure currentProfile is up to date
-		const encrypted = await encryptProfile(currentProfile, newPassphrase);
-		await chrome.storage.local.set({ encryptedUserProfile: encrypted });
-
-		currentPassphrase = newPassphrase;
-		changePassphraseForm.reset();
-
-		showMessage('Passphrase changed successfully!', 'success');
-	} catch (error) {
-		console.error('Change passphrase error:', error);
-		showMessage('Failed to change passphrase.');
+		showMessage('Failed to save profile. Is the server running?');
 	}
 });
 
@@ -434,40 +296,21 @@ deleteProfileBtn.addEventListener('click', async () => {
 		'Are you sure you want to delete your profile?\n\n' +
 		'This will permanently erase all your saved information and cannot be undone.'
 	);
-
 	if (!confirmed) return;
 
-	// Double confirmation
 	const doubleConfirm = confirm(
 		'This is your last chance to cancel.\n\n' +
 		'Click OK to permanently delete your profile.'
 	);
-
 	if (!doubleConfirm) return;
 
 	try {
-		await chrome.storage.local.remove('encryptedUserProfile');
-		currentPassphrase = null;
-		currentProfile = null;
+		await fetch(`${SERVER_BASE}/api/db/profile?userId=${USER_ID}`, { method: 'DELETE' });
 
-		// Clear and reset UI
+		currentProfile = {};
 		profileForm.reset();
-		changePassphraseForm.reset();
 		dynamicFieldsContainer.innerHTML = '';
 		siteDataContainer.innerHTML = '<p class="empty-state">No site data saved yet.</p>';
-
-		statusEl.textContent = 'Locked';
-		statusEl.className = 'status locked';
-		unlockSection.hidden = true;
-		createSection.hidden = false;
-		profileSection.hidden = true;
-		siteDataSection.hidden = true;
-		passphraseSection.hidden = true;
-		dangerSection.hidden = true;
-
-		// Clear create form
-		createPassphraseInput.value = '';
-		confirmPassphraseInput.value = '';
 
 		showMessage('Profile deleted.', 'success');
 	} catch (error) {
@@ -479,4 +322,4 @@ deleteProfileBtn.addEventListener('click', async () => {
 // Initialize on load
 init();
 
-export { isSensitiveField, validatePassphrase, SENSITIVE_FIELDS, STANDARD_FIELDS };
+export { isSensitiveField, SENSITIVE_FIELDS, STANDARD_FIELDS };

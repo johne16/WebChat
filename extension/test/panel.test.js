@@ -31,8 +31,7 @@ vi.mock('../intent.js', () => ({
 	INTENT: { SIMPLE: 'simple', RESEARCH: 'research', AGENT: 'agent' }
 }));
 
-const mockIsProfileUnlocked = vi.fn(() => false);
-const mockUnlockProfile = vi.fn();
+const mockIsProfileUnlocked = vi.fn(() => Promise.resolve(false));
 const mockHasActiveSession = vi.fn(() => false);
 const mockStartAgentSession = vi.fn();
 const mockExecuteAgentGoal = vi.fn();
@@ -44,7 +43,6 @@ const mockGetAgentSession = vi.fn(() => ({ sessionId: null, port: null, taskId: 
 
 vi.mock('../agent.js', () => ({
 	isProfileUnlocked: mockIsProfileUnlocked,
-	unlockProfile: mockUnlockProfile,
 	getAgentSession: mockGetAgentSession,
 	hasActiveSession: mockHasActiveSession,
 	startAgentSession: mockStartAgentSession,
@@ -65,9 +63,6 @@ vi.mock('../ui.js', () => ({
 	removeCurrentForm: vi.fn(),
 	showStickyBanner: vi.fn(),
 	hideStickyBanner: vi.fn(),
-	showPasswordModal: vi.fn(),
-	hidePasswordModal: vi.fn(),
-	onPasswordModal: vi.fn(),
 	showStopButton: vi.fn(),
 	hideStopButton: vi.fn(),
 	onStopAgentClick: vi.fn()
@@ -107,9 +102,6 @@ describe('panel.js', () => {
 		// Reset modules to re-run panel.js with fresh DOM
 		vi.resetModules();
 
-		// Re-apply mocks after resetModules
-		// (vi.mock is hoisted, so they persist)
-
 		// Re-mock chrome.tabs.query to return a tab
 		chrome.tabs.query.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
 		chrome.storage.local.get.mockImplementation((keys) => {
@@ -124,11 +116,6 @@ describe('panel.js', () => {
 		await expect(import('../panel.js')).resolves.not.toThrow();
 	});
 
-	// Note: panel.js has no exports, so testing is limited to verifying
-	// that it registers listeners and calls the right mocks.
-	// The form submit handler, SSE setup, etc., are exercised through
-	// the mocked dependencies.
-
 	it('calls connectSSE on load', async () => {
 		await import('../panel.js');
 		expect(mockConnectSSE).toHaveBeenCalled();
@@ -138,15 +125,6 @@ describe('panel.js', () => {
 		const { addMetaMessage } = await import('../ui.js');
 		await import('../panel.js');
 		expect(addMetaMessage).toHaveBeenCalledWith(expect.stringContaining('Ctrl+Shift+Y'));
-	});
-
-	it('registers onPasswordModal callbacks', async () => {
-		const { onPasswordModal } = await import('../ui.js');
-		await import('../panel.js');
-		expect(onPasswordModal).toHaveBeenCalledWith(expect.objectContaining({
-			onSubmit: expect.any(Function),
-			onCancel: expect.any(Function)
-		}));
 	});
 
 	it('registers onStopAgentClick handler', async () => {

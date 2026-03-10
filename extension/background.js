@@ -4,14 +4,14 @@ const openPanels = new Set();
 let activeTabId = null;
 
 // initial configuration options
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
+	if (details.reason !== 'install') return;
 	chrome.storage.local.set({
 		isTestingMode: false,
 		provider: 'anthropic',
 		modelType: 'claude-haiku-4-5',
 		agentProvider: 'anthropic',
-		agentModelType: 'claude-haiku-4-5',
-		encryptedUserProfile: null  // Encrypted user profile for agent mode
+		agentModelType: 'claude-haiku-4-5'
 	});
 });
 

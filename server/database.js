@@ -1,7 +1,9 @@
 // database.js - SQLite database for WebChat
 import Database from 'better-sqlite3';
+import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { DATABASE_ENCRYPTION_KEY } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -9,6 +11,94 @@ const __dirname = path.dirname(__filename);
 const DB_PATH = process.env.DATABASE_PATH || path.join(__dirname, 'data', 'webchat.db');
 
 let db = null;
+
+// =============================================================================
+// Encryption Helpers (AES-256-GCM)
+// =============================================================================
+
+/**
+ * Encrypt plaintext using AES-256-GCM
+ * @param {string} plaintext
+ * @param {string} key - Hex-encoded 256-bit key
+ * @returns {string} iv:ciphertext:authTag (base64)
+ */
+function encrypt(plaintext, key) {
+	if (plaintext == null) return null;
+	const iv = crypto.randomBytes(12);
+	const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(key, 'hex'), iv);
+	let encrypted = cipher.update(plaintext, 'utf8', 'base64');
+	encrypted += cipher.final('base64');
+	const authTag = cipher.getAuthTag().toString('base64');
+	return `enc:${iv.toString('base64')}:${encrypted}:${authTag}`;
+}
+
+/**
+ * Decrypt ciphertext produced by encrypt()
+ * @param {string} ciphertext - iv:ciphertext:authTag (base64)
+ * @param {string} key - Hex-encoded 256-bit key
+ * @returns {string} Decrypted plaintext
+ */
+function decrypt(ciphertext, key) {
+	if (ciphertext == null) return null;
+	const raw = ciphertext.slice(4); // remove "enc:"
+	const parts = raw.split(':');
+	if (parts.length !== 3) {
+		throw new Error('Invalid encrypted format: expected enc:iv:ciphertext:authTag');
+	}
+	const [ivB64, encB64, tagB64] = parts;
+	const iv = Buffer.from(ivB64, 'base64');
+	const encrypted = Buffer.from(encB64, 'base64');
+	const authTag = Buffer.from(tagB64, 'base64');
+	const decipher = crypto.createDecipheriv('aes-256-gcm', Buffer.from(key, 'hex'), iv);
+	decipher.setAuthTag(authTag);
+	let decrypted = decipher.update(encrypted, null, 'utf8');
+	decrypted += decipher.final('utf8');
+	return decrypted;
+}
+
+/**
+ * Check if a value looks like our encrypted format (iv:ciphertext:authTag)
+ */
+function isEncrypted(value) {
+	if (!value || typeof value !== 'string') return false;
+	return value.startsWith('enc:');
+}
+
+// Encrypt a value, returning null if input is null/undefined
+function encryptField(value) {
+	if (value == null) return null;
+	if (!DATABASE_ENCRYPTION_KEY) throw new Error('DATABASE_ENCRYPTION_KEY is not set');
+	return encrypt(String(value), DATABASE_ENCRYPTION_KEY);
+}
+
+// Decrypt a value, returning null if input is null/undefined
+function decryptField(value) {
+	if (value == null) return null;
+	return decrypt(value, DATABASE_ENCRYPTION_KEY);
+}
+
+// Profile columns that get encrypted (everything except user_id and timestamps)
+const ENCRYPTED_PROFILE_COLS = [
+	'first_name', 'last_name', 'email', 'phone', 'birth_date',
+	'street', 'city', 'state', 'zip', 'country', 'extra_fields'
+];
+
+/**
+ * Decrypt a profile row in place
+ */
+function decryptProfileRow(row) {
+	if (!row) return row;
+	for (const col of ENCRYPTED_PROFILE_COLS) {
+		if (row[col] != null) {
+			row[col] = decryptField(row[col]);
+		}
+	}
+	return row;
+}
+
+// =============================================================================
+// Database Init + Migration
+// =============================================================================
 
 /**
  * Initialize database and create tables
@@ -72,8 +162,62 @@ export function initDatabase() {
 		INSERT OR IGNORE INTO users (id) VALUES (1);
 	`);
 
+	// Migrate plaintext data to encrypted if needed
+	migrateToEncrypted();
+
 	console.log(`[Database] Initialized at ${DB_PATH}`);
 	return db;
+}
+
+/**
+ * Auto-encrypt existing plaintext rows
+ * Detection: if a profile column doesn't match the iv:ciphertext:authTag format, treat as plaintext
+ */
+function migrateToEncrypted() {
+	// Migrate profile rows
+	const profiles = db.prepare('SELECT * FROM profile').all();
+	for (const row of profiles) {
+		let needsUpdate = false;
+		for (const col of ENCRYPTED_PROFILE_COLS) {
+			if (row[col] != null && !isEncrypted(row[col])) {
+				needsUpdate = true;
+				break;
+			}
+		}
+		if (needsUpdate) {
+			db.prepare(`
+				UPDATE profile SET
+					first_name = ?, last_name = ?, email = ?, phone = ?, birth_date = ?,
+					street = ?, city = ?, state = ?, zip = ?, country = ?, extra_fields = ?
+				WHERE user_id = ?
+			`).run(
+				encryptField(row.first_name), encryptField(row.last_name),
+				encryptField(row.email), encryptField(row.phone), encryptField(row.birth_date),
+				encryptField(row.street), encryptField(row.city), encryptField(row.state),
+				encryptField(row.zip), encryptField(row.country), encryptField(row.extra_fields),
+				row.user_id
+			);
+			console.log(`[Database] Migrated profile for user ${row.user_id} to encrypted`);
+		}
+	}
+
+	// Migrate site_data rows
+	const siteRows = db.prepare('SELECT * FROM site_data').all();
+	for (const row of siteRows) {
+		if (row.field_value != null && !isEncrypted(row.field_value)) {
+			db.prepare('UPDATE site_data SET field_value = ? WHERE id = ?')
+				.run(encryptField(row.field_value), row.id);
+		}
+	}
+
+	// Migrate learned_context rows
+	const contextRows = db.prepare('SELECT * FROM learned_context').all();
+	for (const row of contextRows) {
+		if (row.fact != null && !isEncrypted(row.fact)) {
+			db.prepare('UPDATE learned_context SET fact = ? WHERE id = ?')
+				.run(encryptField(row.fact), row.id);
+		}
+	}
 }
 
 /**
@@ -87,13 +231,6 @@ export function getDatabase() {
 	return db;
 }
 
-/**
- * Get database path (for passing to agents)
- */
-export function getDatabasePath() {
-	return DB_PATH;
-}
-
 // =============================================================================
 // Profile Operations
 // =============================================================================
@@ -103,10 +240,15 @@ export function getProfile(userId = 1) {
 		SELECT * FROM profile WHERE user_id = ?
 	`).get(userId);
 
-	if (row && row.extra_fields) {
+	if (!row) return null;
+
+	// Decrypt all encrypted columns
+	decryptProfileRow(row);
+
+	if (row.extra_fields) {
 		row.extra_fields = JSON.parse(row.extra_fields);
 	}
-	return row || null;
+	return row;
 }
 
 export function upsertProfile(userId = 1, data) {
@@ -134,17 +276,17 @@ export function upsertProfile(userId = 1, data) {
 			updated_at = CURRENT_TIMESTAMP
 	`).run(
 		userId,
-		data.first_name || null,
-		data.last_name || null,
-		data.email || null,
-		data.phone || null,
-		data.birth_date || null,
-		data.street || null,
-		data.city || null,
-		data.state || null,
-		data.zip || null,
-		data.country || null,
-		extraFields
+		encryptField(data.first_name || null),
+		encryptField(data.last_name || null),
+		encryptField(data.email || null),
+		encryptField(data.phone || null),
+		encryptField(data.birth_date || null),
+		encryptField(data.street || null),
+		encryptField(data.city || null),
+		encryptField(data.state || null),
+		encryptField(data.zip || null),
+		encryptField(data.country || null),
+		encryptField(extraFields)
 	);
 
 	return getProfile(userId);
@@ -158,7 +300,7 @@ export function updateProfileExtraField(userId = 1, fieldName, fieldValue) {
 	db.prepare(`
 		UPDATE profile SET extra_fields = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE user_id = ?
-	`).run(JSON.stringify(extraFields), userId);
+	`).run(encryptField(JSON.stringify(extraFields)), userId);
 
 	return getProfile(userId);
 }
@@ -168,14 +310,22 @@ export function updateProfileExtraField(userId = 1, fieldName, fieldValue) {
 // =============================================================================
 
 export function getSiteData(userId = 1, domain = null) {
+	let rows;
 	if (domain) {
-		return db.prepare(`
+		rows = db.prepare(`
 			SELECT * FROM site_data WHERE user_id = ? AND domain = ?
 		`).all(userId, domain);
+	} else {
+		rows = db.prepare(`
+			SELECT * FROM site_data WHERE user_id = ?
+		`).all(userId);
 	}
-	return db.prepare(`
-		SELECT * FROM site_data WHERE user_id = ?
-	`).all(userId);
+
+	// Decrypt field_value for each row
+	for (const row of rows) {
+		row.field_value = decryptField(row.field_value);
+	}
+	return rows;
 }
 
 export function upsertSiteData(userId = 1, domain, fieldName, fieldValue) {
@@ -184,9 +334,13 @@ export function upsertSiteData(userId = 1, domain, fieldName, fieldValue) {
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(user_id, domain, field_name) DO UPDATE SET
 			field_value = excluded.field_value
-	`).run(userId, domain, fieldName, fieldValue);
+	`).run(userId, domain, fieldName, encryptField(fieldValue));
 
 	return getSiteData(userId, domain);
+}
+
+export function deleteProfile(userId = 1) {
+	db.prepare('DELETE FROM profile WHERE user_id = ?').run(userId);
 }
 
 export function deleteSiteData(userId = 1, domain, fieldName = null) {
@@ -206,23 +360,28 @@ export function deleteSiteData(userId = 1, domain, fieldName = null) {
 // =============================================================================
 
 export function getLearnedContext(userId = 1) {
-	return db.prepare(`
+	const rows = db.prepare(`
 		SELECT * FROM learned_context WHERE user_id = ?
 		ORDER BY created_at DESC
 	`).all(userId);
+
+	for (const row of rows) {
+		row.fact = decryptField(row.fact);
+	}
+	return rows;
 }
 
 export function addLearnedContext(userId = 1, fact, source = null) {
 	const result = db.prepare(`
 		INSERT INTO learned_context (user_id, fact, source)
 		VALUES (?, ?, ?)
-	`).run(userId, fact, source);
+	`).run(userId, encryptField(fact), source);
 
 	return result.lastInsertRowid;
 }
 
-export function deleteLearnedContext(id) {
-	db.prepare(`DELETE FROM learned_context WHERE id = ?`).run(id);
+export function deleteLearnedContext(id, userId) {
+	db.prepare(`DELETE FROM learned_context WHERE id = ? AND user_id = ?`).run(id, userId);
 }
 
 // =============================================================================

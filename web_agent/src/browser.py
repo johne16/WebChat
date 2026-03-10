@@ -21,7 +21,7 @@ JS_EXTRACT_FORMS = """
         )).map(field => {
             let label = '';
             if (field.id) {
-                const labelEl = document.querySelector(`label[for="${field.id}"]`);
+                const labelEl = field.id ? document.querySelector(`label[for="${CSS.escape(field.id)}"]`) : null;
                 if (labelEl) {
                     label = labelEl.textContent.trim();
                 }
@@ -512,11 +512,12 @@ class BrowserManager:
 
     async def close(self) -> None:
         """Close browser and cleanup"""
-        if self.page:
-            await self.page.close()
-        if self.context:
-            await self.context.close()
-        if self.browser:
-            await self.browser.close()
-        if self.playwright:
-            await self.playwright.stop()
+        for resource, method in [
+            (self.page, 'close'), (self.context, 'close'),
+            (self.browser, 'close'), (self.playwright, 'stop')
+        ]:
+            if resource:
+                try:
+                    await getattr(resource, method)()
+                except Exception as e:
+                    logger.warning(f"Error closing {resource}: {e}")

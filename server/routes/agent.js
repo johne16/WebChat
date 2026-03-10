@@ -4,6 +4,7 @@ import {
 	spawnAgent,
 	killAgent,
 	hasAgent,
+	getAgent,
 	getRunningAgents,
 	getAvailablePorts,
 	forwardContinueSession
@@ -17,6 +18,7 @@ import {
 	addToNeedsInputQueue
 } from "../sseManager.js";
 import { getFullUserData } from "../database.js";
+import { AGENT_CONFIG } from "../config.js";
 
 const router = Router();
 
@@ -48,9 +50,15 @@ router.post("/api/agent/execute-goal", async (req, res) => {
 			return res.status(400).json({ error: "Missing port or goal" });
 		}
 
-		// Verify agent is running on this port
+		if (!AGENT_CONFIG.portPool.includes(port)) {
+			return res.status(400).json({ error: `Invalid port: ${port}` });
+		}
 		if (!hasAgent(port)) {
 			return res.status(400).json({ error: `No agent running on port ${port}` });
+		}
+		const agent = getAgent(port);
+		if (agent && agent.restarting) {
+			return res.status(503).json({ error: "Agent is restarting, please try again shortly" });
 		}
 
 		// Get user data from database and merge with provided profile
@@ -122,6 +130,9 @@ router.post("/api/agent/stop", async (req, res) => {
 router.get("/api/agent/health/:port", async (req, res) => {
 	try {
 		const port = parseInt(req.params.port);
+		if (!AGENT_CONFIG.portPool.includes(port)) {
+			return res.status(400).json({ error: "Invalid port" });
+		}
 		const response = await fetch(`http://localhost:${port}/health`);
 
 		if (response.ok) {
@@ -173,6 +184,13 @@ router.get("/api/events", (req, res) => {
 
 // POST /api/agent/webhook - Webhook endpoint for agent status updates
 router.post("/api/agent/webhook", (req, res) => {
+	// Validate webhook token to ensure request is from a managed agent
+	const token = req.headers['x-webhook-token'];
+	const agent = getAgent(req.body.port);
+	if (!agent || token !== agent.webhookToken) {
+		return res.status(401).json({ error: 'Unauthorized' });
+	}
+
 	const { port, taskId, sessionId, status, message, missingFields, data } = req.body;
 	console.log(`[Webhook] Agent:${port} status=${status}`, message || "");
 

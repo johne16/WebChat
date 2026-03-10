@@ -9,14 +9,16 @@ const needsInputQueue = [];
 // Send event to all connected SSE clients
 export function broadcastSSE(event, data) {
 	const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+	const failed = [];
 	for (const client of sseClients) {
 		try {
 			client.write(message);
 		} catch (err) {
 			console.error("[SSE] Error writing to client:", err);
-			sseClients.delete(client);
+			failed.push(client);
 		}
 	}
+	failed.forEach(c => sseClients.delete(c));
 	console.log(`[SSE] Broadcast '${event}' to ${sseClients.size} clients`);
 }
 

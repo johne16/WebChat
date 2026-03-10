@@ -1,18 +1,22 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import crypto from "crypto";
 
-// Point DATABASE_PATH to in-memory SQLite before importing
+// Point DATABASE_PATH to in-memory SQLite and set encryption key before importing
 const origPath = process.env.DATABASE_PATH;
+const origKey = process.env.DATABASE_ENCRYPTION_KEY;
 process.env.DATABASE_PATH = ":memory:";
+process.env.DATABASE_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex");
 
 afterAll(() => {
 	if (origPath === undefined) delete process.env.DATABASE_PATH;
 	else process.env.DATABASE_PATH = origPath;
+	if (origKey === undefined) delete process.env.DATABASE_ENCRYPTION_KEY;
+	else process.env.DATABASE_ENCRYPTION_KEY = origKey;
 });
 
 import {
 	initDatabase,
 	getDatabase,
-	getDatabasePath,
 	getProfile,
 	upsertProfile,
 	updateProfileExtraField,
@@ -33,10 +37,6 @@ describe("database", () => {
 	afterAll(() => {
 		const db = getDatabase();
 		if (db) db.close();
-	});
-
-	it("getDatabasePath returns the configured path", () => {
-		expect(getDatabasePath()).toBe(":memory:");
 	});
 
 	it("getDatabase returns the db instance after init", () => {
@@ -82,6 +82,18 @@ describe("database", () => {
 			expect(profile.extra_fields.nickname).toBe("Johnny");
 			expect(profile.extra_fields.favoriteColor).toBe("blue"); // preserved
 		});
+
+		it("stores encrypted data in the raw DB but returns plaintext via getProfile", () => {
+			const db = getDatabase();
+			const raw = db.prepare("SELECT email FROM profile WHERE user_id = 1").get();
+			// Raw value should be encrypted (iv:ciphertext:authTag format)
+			expect(raw.email).toContain(":");
+			expect(raw.email).not.toBe("new@example.com");
+
+			// But getProfile returns decrypted
+			const profile = getProfile(1);
+			expect(profile.email).toBe("new@example.com");
+		});
 	});
 
 	describe("site data", () => {
@@ -112,6 +124,13 @@ describe("database", () => {
 			const domains = [...new Set(all.map(d => d.domain))];
 			expect(domains).toContain("example.com");
 			expect(domains).toContain("other.com");
+		});
+
+		it("stores field_value encrypted in raw DB", () => {
+			const db = getDatabase();
+			const raw = db.prepare("SELECT field_value FROM site_data WHERE domain = 'example.com' AND field_name = 'username'").get();
+			expect(raw.field_value).toContain(":");
+			expect(raw.field_value).not.toBe("updated_jdoe");
 		});
 
 		it("deleteSiteData with fieldName deletes a single field", () => {
@@ -153,6 +172,13 @@ describe("database", () => {
 			const facts = getLearnedContext(1);
 			// Most recent first
 			expect(facts[0].fact).toBe("Fact B");
+		});
+
+		it("stores facts encrypted in raw DB", () => {
+			const db = getDatabase();
+			const raw = db.prepare("SELECT fact FROM learned_context ORDER BY id DESC LIMIT 1").get();
+			expect(raw.fact).toContain(":");
+			expect(raw.fact).not.toBe("Fact B");
 		});
 
 		it("deleteLearnedContext removes a fact by id", () => {

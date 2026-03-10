@@ -1,6 +1,5 @@
 """Action Executor - Execute actions decided by the planner"""
 
-import asyncio
 import time
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, Callable, Awaitable
@@ -174,15 +173,8 @@ class ActionExecutor:
             try:
                 # Wait for navigation and click submit
                 nav_t0 = time.perf_counter()
-                wait_task = asyncio.create_task(
-                    self.browser.page.wait_for_url(
-                        lambda url: url != current_url,
-                        timeout=config.NAVIGATION_TIMEOUT
-                    )
-                )
-
-                await self.browser.page.click(submit_selector)
-                await wait_task
+                async with self.browser.page.expect_navigation(timeout=config.NAVIGATION_TIMEOUT):
+                    await self.browser.page.click(submit_selector)
                 nav_wait = time.perf_counter() - nav_t0
                 navigated = True
                 new_url = self.browser.page.url
@@ -243,7 +235,8 @@ class ActionExecutor:
                 await self.browser.page.click(params["selector"])
             elif text_param in params:
                 text = params[text_param]
-                await self.browser.page.click(f"{element_selector}:has-text('{text}')")
+                escaped_text = text.replace("'", "\\'")
+                await self.browser.page.click(f"{element_selector}:has-text('{escaped_text}')")
             else:
                 return ActionResult(
                     success=False,
@@ -382,12 +375,12 @@ class ActionExecutor:
         try:
             if selector:
                 # Extract content from specific element
-                content = await self.browser.page.evaluate(f"""
-                    () => {{
-                        const el = document.querySelector('{selector}');
+                content = await self.browser.page.evaluate("""
+                    (selector) => {
+                        const el = document.querySelector(selector);
                         return el ? el.textContent.trim() : null;
-                    }}
-                """)
+                    }
+                """, selector)
             else:
                 # Get full page content
                 content = await self.browser.get_readable_content()

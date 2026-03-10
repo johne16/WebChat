@@ -8,7 +8,6 @@ import { connectSSE, disconnectSSE } from './agentClient.js';
 import { detectIntent, INTENT } from './intent.js';
 import {
 	isProfileUnlocked,
-	unlockProfile,
 	getAgentSession,
 	hasActiveSession,
 	startAgentSession,
@@ -28,9 +27,6 @@ import {
 	removeCurrentForm,
 	showStickyBanner,
 	hideStickyBanner,
-	showPasswordModal,
-	hidePasswordModal,
-	onPasswordModal,
 	showStopButton,
 	hideStopButton,
 	onStopAgentClick
@@ -56,7 +52,7 @@ function getMaxAgentSteps() { return getConfig()?.agent?.maxSteps || 20; }
 
 // Derive agent display number from port (5001 → 1, 5002 → 2, etc.)
 function agentLabel(port) {
-	return port ? `Agent ${port % 10}` : 'Agent';
+	return port ? `Agent ${port - 5000}` : 'Agent';
 }
 
 // Load settings (wrapped in try/catch for top-level await safety)
@@ -101,7 +97,8 @@ window.addEventListener('beforeunload', () => {
  */
 function isOurSession(data) {
 	const session = getAgentSession();
-	return !session.port || data.port === session.port;
+	if (!session.port) return false;
+	return data.port === session.port;
 }
 
 function setupSSE() {
@@ -352,16 +349,14 @@ async function handleAgentIntent(text, url, intentResult) {
 		return;
 	}
 
-	// Check if profile is unlocked
-	if (!isProfileUnlocked()) {
-		// Store pending request and prompt for passphrase
-		pendingAgentRequest = { text, url };
-		addMessage('bot', `I'll help you with that on ${url}. First, I need to unlock your profile. Please enter your passphrase.`);
-		showPasswordModal();
+	// Check if profile exists on server
+	const hasProfile = await isProfileUnlocked();
+	if (!hasProfile) {
+		addMessage('bot', 'No profile found. Please set up your profile in Settings first.');
 		return;
 	}
 
-	// Profile unlocked - ask for confirmation
+	// Ask for confirmation
 	const confidence = intentResult.confidence === 'high' ? '' : ' (I think)';
 	addMessage('bot', `This looks like a task for the web agent${confidence}. I'll open a browser and work on: "${text}" at ${url}. Should I proceed?`);
 	pendingAgentRequest = { text, url };
@@ -436,42 +431,6 @@ function getActionDescription(stepInfo) {
 			return `Action: ${stepInfo.action}`;
 	}
 }
-
-// =============================================================================
-// Password Modal (DOM logic in ui.js, callbacks here)
-// =============================================================================
-
-onPasswordModal({
-	onCancel: () => {
-		if (pendingAgentRequest) {
-			addMessage('bot', 'Agent task cancelled.');
-			pendingAgentRequest = null;
-		}
-	},
-	onSubmit: async (passphrase) => {
-		try {
-			await unlockProfile(passphrase);
-			hidePasswordModal();
-
-			if (pendingAgentRequest) {
-				const { text, url } = pendingAgentRequest;
-				// Now ask for confirmation
-				addMessage('bot', `Profile unlocked. I'll open a browser and work on: "${text}" at ${url}. Should I proceed?`);
-			} else {
-				addMessage('bot', 'Profile unlocked.');
-			}
-		} catch (error) {
-			console.error('[Panel] Unlock error:', error);
-			if (error.message.includes('decrypt')) {
-				addMessage('bot', 'Incorrect passphrase. Please try again.');
-			} else {
-				addMessage('bot', `Error: ${error.message}`);
-			}
-			hidePasswordModal();
-			pendingAgentRequest = null;
-		}
-	}
-});
 
 // =============================================================================
 // Banner Continue

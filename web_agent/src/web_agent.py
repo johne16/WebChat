@@ -12,7 +12,6 @@ from src.action_executor import ActionExecutor
 from src.memory import SessionMemory, ActionRecord
 from src.config import config, GoalStatus
 from src.metrics import MetricsLogger
-from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
@@ -32,23 +31,23 @@ class AutonomousWebAgent:
     def __init__(
         self,
         session_id: Optional[str] = None,
-        db_path: Optional[Path] = None,
         callback_url: Optional[str] = None,
         port: Optional[int] = None,
         task_id: Optional[str] = None,
         provider: Optional[str] = None,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        webhook_token: Optional[str] = None
     ):
         """Initialize autonomous web agent
 
         Args:
             session_id: Existing session ID to resume, or None for new session
-            db_path: Path to SQLite database, or None for default
             callback_url: URL to POST status updates (webhooks)
             port: Port this agent is running on (for webhook identification)
             task_id: Task ID (for webhook identification)
             provider: LLM provider override ('openai' or 'anthropic')
             model: LLM model override
+            webhook_token: Authentication token for webhook requests
         """
         self.browser = BrowserManager(
             headless=config.HEADLESS,
@@ -56,8 +55,12 @@ class AutonomousWebAgent:
         )
 
         effective_provider = provider or config.PROVIDER
-        effective_model = model or config.OPENAI_MODEL
-        api_key = config.ANTHROPIC_API_KEY if effective_provider == "anthropic" else config.OPENAI_API_KEY
+        if effective_provider == "anthropic":
+            effective_model = model or config.ANTHROPIC_MODEL
+            api_key = config.ANTHROPIC_API_KEY
+        else:
+            effective_model = model or config.OPENAI_MODEL
+            api_key = config.OPENAI_API_KEY
 
         self.llm = LLMClient(
             provider=effective_provider,
@@ -65,7 +68,8 @@ class AutonomousWebAgent:
             model=effective_model,
             temperature=config.TEMPERATURE
         )
-        self.memory = SessionMemory(session_id, db_path=db_path)
+        self._session_id = session_id
+        self.memory: Optional[SessionMemory] = None
         self.action_executor: Optional[ActionExecutor] = None
         self.execution_engine: Optional[ExecutionEngine] = None
 
@@ -73,6 +77,7 @@ class AutonomousWebAgent:
         self.callback_url = callback_url
         self.port = port
         self.task_id = task_id
+        self.webhook_token = webhook_token
         self._http_client: Optional[httpx.AsyncClient] = None
 
         # Tracking
@@ -116,7 +121,10 @@ class AutonomousWebAgent:
         try:
             if self._http_client is None:
                 self._http_client = httpx.AsyncClient()
-            await self._http_client.post(self.callback_url, json=payload, timeout=5.0)
+            headers = {}
+            if self.webhook_token:
+                headers['x-webhook-token'] = self.webhook_token
+            await self._http_client.post(self.callback_url, json=payload, headers=headers, timeout=5.0)
             if config.DEBUG:
                 logger.debug(f"[WEBHOOK] Sent status={status} to {self.callback_url}")
         except Exception as e:
@@ -170,6 +178,10 @@ class AutonomousWebAgent:
         # Reset browser close flag (keep open for awaiting_user_action, needs_input)
         self._should_close_browser = True
 
+        # Initialize session memory (async DB setup)
+        if self.memory is None:
+            self.memory = await SessionMemory.create(self._session_id)
+
         # Initialize metrics logger for this goal execution
         self._metrics = MetricsLogger(self.memory.session_id)
 
@@ -178,7 +190,7 @@ class AutonomousWebAgent:
         self.memory.status = GoalStatus.IN_PROGRESS
 
         # Store or merge user profile; detect resume to suppress duplicate "Starting goal" message
-        is_resume = self.memory.user_profile is not None
+        is_resume = bool(self.memory.user_profile)
         if is_resume:
             self.memory.update_user_profile(user_profile)
         else:
@@ -244,6 +256,7 @@ class AutonomousWebAgent:
                 if config.DEBUG:
                     logger.debug(f"{'='*60}")
                     logger.debug(f"[AGENT] Step {step}/{max_steps}")
+                if config.DEBUG and self.browser.page:
                     logger.debug(f"[AGENT] Current URL: {self.browser.page.url}")
 
                 # 1. Build page context for LLM
@@ -335,7 +348,7 @@ class AutonomousWebAgent:
                 "message": f"Reached maximum step limit ({max_steps})",
                 "details": {}
             })
-            self.memory.save()
+            await self.memory.save()
 
             # Send webhook: failed
             await self._send_webhook(GoalStatus.FAILED, f"Exceeded max steps ({max_steps})")
@@ -353,7 +366,7 @@ class AutonomousWebAgent:
                 "message": str(e),
                 "details": {}
             })
-            self.memory.save()
+            await self.memory.save()
 
             # Send webhook: failed
             await self._send_webhook(GoalStatus.FAILED, f"Unexpected error: {str(e)}")
@@ -389,7 +402,7 @@ class AutonomousWebAgent:
 
         if status == GoalStatus.ACHIEVED:
             self.memory.status = GoalStatus.ACHIEVED
-            self.memory.save()
+            await self.memory.save()
             self._should_close_browser = True
             await self._send_webhook(GoalStatus.ACHIEVED, "Goal completed successfully")
             return self._build_response(success=True, goal_achieved=True, errors=errors)
@@ -397,7 +410,7 @@ class AutonomousWebAgent:
         if status == GoalStatus.BLOCKED:
             self.memory.status = GoalStatus.BLOCKED
             errors.append({"type": "goal_blocked", "message": plan["reasoning"], "details": {}})
-            self.memory.save()
+            await self.memory.save()
             self._should_close_browser = True
             await self._send_webhook(GoalStatus.BLOCKED, plan["reasoning"])
             return self._build_response(success=False, goal_achieved=False, errors=errors)
@@ -406,7 +419,7 @@ class AutonomousWebAgent:
             missing_fields = plan.get("missing_fields", [])
             self.memory.status = GoalStatus.NEEDS_INPUT
             self.memory.set_missing_fields(missing_fields)
-            self.memory.save()
+            await self.memory.save()
             self._should_close_browser = False
             await self._send_webhook(GoalStatus.NEEDS_INPUT, plan["reasoning"], missing_fields=missing_fields)
             return self._build_response(
@@ -416,7 +429,7 @@ class AutonomousWebAgent:
 
         if status == GoalStatus.AWAITING_USER_ACTION:
             self.memory.status = GoalStatus.AWAITING_USER_ACTION
-            self.memory.save()
+            await self.memory.save()
             self._should_close_browser = False
             await self._send_webhook(GoalStatus.AWAITING_USER_ACTION, plan["reasoning"])
             return self._build_response(
@@ -491,14 +504,14 @@ class AutonomousWebAgent:
 
             if consecutive_failures >= config.CONSECUTIVE_FAILURE_THRESHOLD:
                 self.memory.status = GoalStatus.FAILED
-                self.memory.save()
+                await self.memory.save()
                 await self._send_webhook(GoalStatus.FAILED, "Too many consecutive failures")
                 return consecutive_failures, True, result
         else:
             consecutive_failures = 0
 
         # Save memory after each step
-        self.memory.save()
+        await self.memory.save()
 
         # Send webhook: step completed
         await self._send_webhook(GoalStatus.STEP_COMPLETED, f"Step {step}: {plan['action']}", data={
@@ -552,7 +565,7 @@ class AutonomousWebAgent:
                 "enteredData": {k: "***" if "password" in k.lower() else v
                                for k, v in self.memory.entered_data.items()},
                 "visitedUrls": self.memory.visited_urls,
-                "extractedInfo": self.memory._extracted_info
+                "extractedInfo": self.memory.get_context_for_llm().get("extracted_info", {})
             },
             "errors": errors
         }

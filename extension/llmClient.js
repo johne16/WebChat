@@ -4,24 +4,24 @@ import { SERVER_BASE, getConfig } from './config.js';
 import { crawlPage, parseJsonFromLLM } from './utils.js';
 
 // Cache modelType and provider at module level (item 4)
-// Hardcoded defaults used until storage read completes
-let cachedModel = 'gpt-5.2';
-let cachedProvider = 'openai';
+// Defaults come from config pipeline via getConfig()
+let cachedModel = null;
+let cachedProvider = null;
 
 // Initialize from storage
 chrome.storage.local.get(['modelType', 'provider']).then(({ modelType, provider }) => {
-	if (modelType) cachedModel = modelType;
-	if (provider) cachedProvider = provider;
+	cachedModel = modelType || getConfig()?.providers?.defaultModel;
+	cachedProvider = provider || getConfig()?.providers?.default;
 });
 
 // Keep in sync with storage changes
 chrome.storage.onChanged.addListener((changes, area) => {
 	if (area === 'local') {
 		if ('modelType' in changes) {
-			cachedModel = changes.modelType.newValue || getConfig()?.providers?.defaultModel || 'gpt-5.2';
+			cachedModel = changes.modelType.newValue || getConfig()?.providers?.defaultModel;
 		}
 		if ('provider' in changes) {
-			cachedProvider = changes.provider.newValue || getConfig()?.providers?.default || 'openai';
+			cachedProvider = changes.provider.newValue || getConfig()?.providers?.default;
 		}
 	}
 });

@@ -5,6 +5,7 @@ vi.mock("../../agentManager.js", () => ({
 	spawnAgent: vi.fn(),
 	killAgent: vi.fn(),
 	hasAgent: vi.fn(),
+	getAgent: vi.fn(),
 	getRunningAgents: vi.fn().mockReturnValue([]),
 	getAvailablePorts: vi.fn().mockReturnValue([5001, 5002, 5003, 5004, 5005]),
 	forwardContinueSession: vi.fn()
@@ -23,7 +24,7 @@ vi.mock("../../database.js", () => ({
 	getFullUserData: vi.fn().mockReturnValue({ profile: {}, siteData: {} })
 }));
 
-import { spawnAgent, killAgent, hasAgent, getRunningAgents, getAvailablePorts, forwardContinueSession } from "../../agentManager.js";
+import { spawnAgent, killAgent, hasAgent, getAgent, getRunningAgents, getAvailablePorts, forwardContinueSession } from "../../agentManager.js";
 import { broadcastSSE, addSSEClient, removeSSEClient, getNeedsInputQueue, addToNeedsInputQueue, removeFromNeedsInputQueue } from "../../sseManager.js";
 import { getFullUserData } from "../../database.js";
 
@@ -215,8 +216,52 @@ describe("routes/agent", () => {
 	});
 
 	describe("POST /api/agent/webhook", () => {
-		it("broadcasts agent-status to SSE clients", () => {
+		const VALID_TOKEN = "test-webhook-token-abc123";
+
+		it("returns 401 if token is missing", () => {
+			getAgent.mockReturnValueOnce({ webhookToken: VALID_TOKEN });
 			const req = mockReq({
+				body: { port: 5001, taskId: "t1", status: "running" }
+			});
+			const res = mockRes();
+
+			getHandler("POST", "/api/agent/webhook")(req, res);
+
+			expect(res.status).toHaveBeenCalledWith(401);
+			expect(broadcastSSE).not.toHaveBeenCalled();
+		});
+
+		it("returns 401 if token is invalid", () => {
+			getAgent.mockReturnValueOnce({ webhookToken: VALID_TOKEN });
+			const req = mockReq({
+				headers: { 'x-webhook-token': 'wrong-token' },
+				body: { port: 5001, taskId: "t1", status: "running" }
+			});
+			const res = mockRes();
+
+			getHandler("POST", "/api/agent/webhook")(req, res);
+
+			expect(res.status).toHaveBeenCalledWith(401);
+			expect(broadcastSSE).not.toHaveBeenCalled();
+		});
+
+		it("returns 401 if no agent found for port", () => {
+			getAgent.mockReturnValueOnce(undefined);
+			const req = mockReq({
+				headers: { 'x-webhook-token': VALID_TOKEN },
+				body: { port: 9999, taskId: "t1", status: "running" }
+			});
+			const res = mockRes();
+
+			getHandler("POST", "/api/agent/webhook")(req, res);
+
+			expect(res.status).toHaveBeenCalledWith(401);
+		});
+
+		it("broadcasts agent-status to SSE clients", () => {
+			getAgent.mockReturnValueOnce({ webhookToken: VALID_TOKEN });
+			const req = mockReq({
+				headers: { 'x-webhook-token': VALID_TOKEN },
 				body: { port: 5001, taskId: "t1", sessionId: "s1", status: "running", message: "Working" }
 			});
 			const res = mockRes();
@@ -231,7 +276,9 @@ describe("routes/agent", () => {
 		});
 
 		it("adds to needs-input queue on needs_input status", () => {
+			getAgent.mockReturnValueOnce({ webhookToken: VALID_TOKEN });
 			const req = mockReq({
+				headers: { 'x-webhook-token': VALID_TOKEN },
 				body: {
 					port: 5001, taskId: "t1", sessionId: "s1",
 					status: "needs_input", missingFields: ["email"], message: "Need email"
@@ -250,7 +297,9 @@ describe("routes/agent", () => {
 		});
 
 		it("removes from queue on achieved status", () => {
+			getAgent.mockReturnValueOnce({ webhookToken: VALID_TOKEN });
 			const req = mockReq({
+				headers: { 'x-webhook-token': VALID_TOKEN },
 				body: { port: 5001, taskId: "t1", status: "achieved" }
 			});
 			const res = mockRes();
@@ -261,7 +310,9 @@ describe("routes/agent", () => {
 		});
 
 		it("removes from queue on failed status", () => {
+			getAgent.mockReturnValueOnce({ webhookToken: VALID_TOKEN });
 			const req = mockReq({
+				headers: { 'x-webhook-token': VALID_TOKEN },
 				body: { port: 5001, taskId: "t1", status: "failed" }
 			});
 			const res = mockRes();
