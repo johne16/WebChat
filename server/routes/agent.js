@@ -251,9 +251,17 @@ router.post("/api/agent/provide-input", async (req, res) => {
 		// Item 5: Use shared queue removal helper (port+sessionId predicate for input)
 		removeFromNeedsInputQueue(item => item.port === port && item.sessionId === sessionId);
 
+		// Strip SSN fields before forwarding to agent
+		const NEVER_STORE_FIELDS = ['ssn', 'social_security', 'socialsecurity', 'social-security'];
+		const sanitizedInput = Object.fromEntries(
+			Object.entries(inputData || {}).filter(
+				([key]) => !NEVER_STORE_FIELDS.some(f => key.toLowerCase().includes(f))
+			)
+		);
+
 		// Item 2: Use shared continue-session helper
 		console.log(`[Agent:${port}] Providing input for session ${sessionId}`);
-		const data = await forwardContinueSession(port, sessionId, inputData, provider, model);
+		const data = await forwardContinueSession(port, sessionId, sanitizedInput, provider, model);
 
 		// Only broadcast input-provided if agent doesn't need more input
 		if (data.status !== "needs_input") {

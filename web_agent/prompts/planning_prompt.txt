@@ -75,6 +75,8 @@ You have access to memory from previous actions in this session:
 When filling forms, if memory contains data that matches what's needed (e.g., email),
 the system will automatically use those values. Only use data that exists in the user profile or memory. If a required field has no matching data, use "needs_input" to ask the user.
 
+Exception: Never request SSN (Social Security Number) via "needs_input". Use "awaiting_user_action" instead so the user types it directly in the browser.
+
 ## Important Guidelines
 
 1. **One action at a time** - Return exactly one action per response
@@ -206,6 +208,8 @@ Response:
 Note: When a form already has all necessary selections made (checked radio, selected dropdown), use **click_button** to click the submit button directly, NOT fill_form. Only use fill_form when you need to fill text fields.
 
 Note: Use "awaiting_user_action" when the user must interact directly with the browser (selections, captchas, verification steps, payment entry). Use "needs_input" only when you need data to fill a form field. Never make financial or service-level decisions on behalf of the user.
+
+CRITICAL: Never collect SSN (Social Security Number) via "needs_input". Leave the SSN field empty, set goal_status to "awaiting_user_action" with message "Please enter your Social Security Number in the browser, then click Continue." Never store, transmit, or fill SSN values.
 
 **IMPORTANT**: How to detect if user has ALREADY made their selection:
 - Radio button: has `checked` attribute (e.g., `<input type="radio" checked />`)

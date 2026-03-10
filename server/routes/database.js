@@ -91,6 +91,10 @@ router.post("/api/db/site-data", withErrorHandler("Update site data", (req, res)
 	if (!domain || !fieldName) {
 		return res.status(400).json({ error: "Missing domain or fieldName" });
 	}
+	const NEVER_STORE_FIELDS = ['ssn', 'social_security', 'socialsecurity', 'social-security'];
+	if (NEVER_STORE_FIELDS.some(f => fieldName.toLowerCase().includes(f))) {
+		return res.status(400).json({ error: "This field cannot be stored" });
+	}
 	const userId = getUserId(req);
 	const data = upsertSiteData(userId, domain, fieldName, fieldValue);
 	res.json({ siteData: data });

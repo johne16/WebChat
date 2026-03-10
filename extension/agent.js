@@ -198,8 +198,11 @@ async function saveSiteData(formData) {
 		const domain = extractDomain(currentAgentUrl);
 		const userId = getConfig()?.extension?.userId || 1;
 
+		const NEVER_STORE_FIELDS = ['ssn', 'social_security', 'socialsecurity', 'social-security'];
+
 		const promises = Object.entries(formData)
 			.filter(([, value]) => value && value.toString().trim())
+			.filter(([key]) => !NEVER_STORE_FIELDS.some(f => key.toLowerCase().includes(f)))
 			.map(([key, value]) =>
 				fetch(`${SERVER_BASE}/api/db/site-data`, {
 					method: 'POST',
