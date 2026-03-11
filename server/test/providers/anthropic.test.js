@@ -1,16 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mockCreate = vi.fn();
+const { mockCreate } = vi.hoisted(() => ({ mockCreate: vi.fn() }));
 vi.mock("@anthropic-ai/sdk", () => {
-	return {
-		default: class MockAnthropic {
-			constructor() {
-				this.messages = {
-					create: mockCreate
-				};
-			}
+	class APIError extends Error {}
+	class MockAnthropic {
+		constructor() {
+			this.messages = {
+				create: mockCreate
+			};
 		}
-	};
+	}
+	MockAnthropic.APIError = APIError;
+	return { default: MockAnthropic };
 });
 
 import { chat } from "../../providers/anthropic.js";

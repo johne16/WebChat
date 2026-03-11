@@ -1,6 +1,7 @@
 """Tests for browser.py - Playwright wrapper and HTML preprocessing"""
 
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 from src.browser import BrowserManager
 
 
@@ -279,3 +280,160 @@ async def test_build_page_context_structure():
     assert "## Available Links" in ctx
     assert "Available Buttons" not in ctx  # None was returned
     assert "Some page text" in ctx
+
+
+# =============================================================================
+# Unit tests for public methods (mocked, no network)
+# =============================================================================
+
+
+def test_is_running_false_when_no_browser():
+    """Test is_running returns False when browser is None"""
+    browser = BrowserManager(headless=True)
+    assert browser.is_running() is False
+
+
+def test_is_running_true_when_connected():
+    """Test is_running returns True when browser is connected"""
+    browser = BrowserManager(headless=True)
+    browser.browser = MagicMock()
+    browser.browser.is_connected.return_value = True
+    assert browser.is_running() is True
+
+
+def test_is_running_false_when_disconnected():
+    """Test is_running returns False when browser is disconnected"""
+    browser = BrowserManager(headless=True)
+    browser.browser = MagicMock()
+    browser.browser.is_connected.return_value = False
+    assert browser.is_running() is False
+
+
+@pytest.mark.asyncio
+async def test_launch_skips_when_already_running():
+    """Test launch is idempotent when browser is already connected"""
+    browser = BrowserManager(headless=True)
+    browser.browser = MagicMock()
+    browser.browser.is_connected.return_value = True
+
+    # Should return immediately without starting playwright
+    await browser.launch()
+    # browser object should be unchanged
+    assert browser.browser.is_connected.return_value is True
+
+
+@pytest.mark.asyncio
+async def test_screenshot_delegates_to_page():
+    """Test screenshot calls page.screenshot with path"""
+    browser = BrowserManager(headless=True)
+    browser.page = MagicMock()
+    browser.page.screenshot = AsyncMock()
+
+    await browser.screenshot("/tmp/test.png")
+    browser.page.screenshot.assert_called_once_with(path="/tmp/test.png")
+
+
+@pytest.mark.asyncio
+async def test_scroll_down_default():
+    """Test scroll down uses config default pixels"""
+    browser = BrowserManager(headless=True)
+    browser.page = MagicMock()
+    browser.page.evaluate = AsyncMock()
+
+    await browser.scroll("down")
+    browser.page.evaluate.assert_called_once()
+    call_arg = browser.page.evaluate.call_args[0][0]
+    assert "500" in call_arg  # default SCROLL_PIXELS
+
+
+@pytest.mark.asyncio
+async def test_scroll_up():
+    """Test scroll up uses negative amount"""
+    browser = BrowserManager(headless=True)
+    browser.page = MagicMock()
+    browser.page.evaluate = AsyncMock()
+
+    await browser.scroll("up", 300)
+    call_arg = browser.page.evaluate.call_args[0][0]
+    assert "-300" in call_arg
+
+
+@pytest.mark.asyncio
+async def test_go_back_success():
+    """Test go_back returns success on normal navigation"""
+    browser = BrowserManager(headless=True)
+    browser.page = MagicMock()
+    browser.page.go_back = AsyncMock()
+
+    result = await browser.go_back()
+    assert result["success"] is True
+    assert result["error"] is None
+
+
+@pytest.mark.asyncio
+async def test_go_back_failure():
+    """Test go_back returns error on exception"""
+    browser = BrowserManager(headless=True)
+    browser.page = MagicMock()
+    browser.page.go_back = AsyncMock(side_effect=Exception("no history"))
+
+    result = await browser.go_back()
+    assert result["success"] is False
+    assert result["error"]["type"] == "navigation_error"
+
+
+@pytest.mark.asyncio
+async def test_wait_for_navigation_returns_false_on_timeout():
+    """Test wait_for_navigation returns False when URL doesn't change"""
+    from playwright.async_api import TimeoutError as PlaywrightTimeout
+
+    browser = BrowserManager(headless=True)
+    browser.page = MagicMock()
+    browser.page.url = "http://example.com"
+    browser.page.wait_for_url = AsyncMock(side_effect=PlaywrightTimeout("timeout"))
+
+    result = await browser.wait_for_navigation(timeout=100)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_get_page_buttons_returns_none_on_empty():
+    """Test get_page_buttons returns None when no buttons found"""
+    browser = BrowserManager(headless=True)
+    browser.page = MagicMock()
+    browser.page.evaluate = AsyncMock(return_value="[]")
+
+    result = await browser.get_page_buttons()
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_page_buttons_returns_formatted_string():
+    """Test get_page_buttons formats buttons correctly"""
+    import json
+    buttons = [{"text": "Submit", "id": "btn-submit"}, {"text": "Cancel", "id": ""}]
+    browser = BrowserManager(headless=True)
+    browser.page = MagicMock()
+    browser.page.evaluate = AsyncMock(return_value=json.dumps(buttons))
+
+    result = await browser.get_page_buttons()
+    assert "Submit" in result
+    assert "(id=btn-submit)" in result
+    assert "Cancel" in result
+
+
+@pytest.mark.asyncio
+async def test_close_handles_errors_gracefully():
+    """Test close handles exceptions from individual resources"""
+    browser = BrowserManager(headless=True)
+    browser.page = MagicMock()
+    browser.page.close = AsyncMock(side_effect=Exception("already closed"))
+    browser.context = MagicMock()
+    browser.context.close = AsyncMock()
+    browser.browser = MagicMock()
+    browser.browser.close = AsyncMock()
+    browser.playwright = MagicMock()
+    browser.playwright.stop = AsyncMock()
+
+    # Should not raise despite page.close failing
+    await browser.close()

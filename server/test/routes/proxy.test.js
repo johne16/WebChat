@@ -55,11 +55,11 @@ describe("routes/proxy", () => {
 			expect(res.status).toHaveBeenCalledWith(400);
 		});
 
-		it("routes to openai provider by default", async () => {
-			openaiChat.mockResolvedValueOnce({ content: "hello", usage: {} });
+		it("routes to anthropic provider by default", async () => {
+			anthropicChat.mockResolvedValueOnce({ content: "hello", usage: {} });
 			const req = mockReq({
 				body: {
-					model: "gpt-5.2",
+					model: "claude-haiku-4-5",
 					messages: [{ role: "user", content: "hi" }]
 				}
 			});
@@ -67,8 +67,8 @@ describe("routes/proxy", () => {
 
 			await handler()(req, res);
 
-			expect(openaiChat).toHaveBeenCalled();
-			expect(anthropicChat).not.toHaveBeenCalled();
+			expect(anthropicChat).toHaveBeenCalled();
+			expect(openaiChat).not.toHaveBeenCalled();
 			expect(res.json).toHaveBeenCalledWith({ content: "hello", usage: {} });
 		});
 
@@ -108,6 +108,7 @@ describe("routes/proxy", () => {
 			const req = mockReq({
 				body: {
 					model: "gpt-5.2",
+					provider: "openai",
 					messages: [
 						{ role: "system", content: "sys" },
 						{ role: "user", content: "new" }
@@ -129,10 +130,10 @@ describe("routes/proxy", () => {
 			const err = new Error("Rate limit exceeded");
 			err.status = 429;
 			err.retryAfter = "30";
-			openaiChat.mockRejectedValueOnce(err);
+			anthropicChat.mockRejectedValueOnce(err);
 
 			const req = mockReq({
-				body: { model: "gpt-5.2", messages: [{ role: "user", content: "hi" }] }
+				body: { model: "claude-haiku-4-5", messages: [{ role: "user", content: "hi" }] }
 			});
 			const res = mockRes();
 
@@ -149,10 +150,10 @@ describe("routes/proxy", () => {
 		it("returns 401 when provider throws auth error", async () => {
 			const err = new Error("Invalid API key");
 			err.status = 401;
-			openaiChat.mockRejectedValueOnce(err);
+			anthropicChat.mockRejectedValueOnce(err);
 
 			const req = mockReq({
-				body: { model: "gpt-5.2", messages: [{ role: "user", content: "hi" }] }
+				body: { model: "claude-haiku-4-5", messages: [{ role: "user", content: "hi" }] }
 			});
 			const res = mockRes();
 
@@ -163,10 +164,10 @@ describe("routes/proxy", () => {
 		});
 
 		it("returns 500 when provider throws plain Error without status", async () => {
-			openaiChat.mockRejectedValueOnce(new Error("Something broke"));
+			anthropicChat.mockRejectedValueOnce(new Error("Something broke"));
 
 			const req = mockReq({
-				body: { model: "gpt-5.2", messages: [{ role: "user", content: "hi" }] }
+				body: { model: "claude-haiku-4-5", messages: [{ role: "user", content: "hi" }] }
 			});
 			const res = mockRes();
 
@@ -177,10 +178,10 @@ describe("routes/proxy", () => {
 		});
 
 		it("stores conversation in history when storeInHistory is true", async () => {
-			openaiChat.mockResolvedValueOnce({ content: "reply", usage: null });
+			anthropicChat.mockResolvedValueOnce({ content: "reply", usage: null });
 			const req = mockReq({
 				body: {
-					model: "gpt-5.2",
+					model: "claude-haiku-4-5",
 					messages: [{ role: "user", content: "question" }],
 					storeInHistory: true,
 					userId: 1
@@ -243,7 +244,7 @@ describe("routes/proxy", () => {
 			await handler(req, res);
 
 			expect(globalThis.fetch).toHaveBeenCalledWith(
-				"http://localhost:11235/crawl",
+				"http://localhost:11235/extract",
 				expect.objectContaining({
 					method: "POST",
 					body: expect.any(String)

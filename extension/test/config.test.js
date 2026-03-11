@@ -37,7 +37,7 @@ describe('config.js', () => {
 		expect(mod.getConfig()).toEqual(configData);
 	});
 
-	it('loadConfig caches so subsequent calls do not re-fetch', async () => {
+	it('loadConfig always re-fetches on each call', async () => {
 		const configData = { providers: {}, extension: {} };
 		vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({
 			ok: true,
@@ -47,7 +47,7 @@ describe('config.js', () => {
 		const mod = await import('../config.js');
 		await mod.loadConfig();
 		await mod.loadConfig(); // second call
-		expect(globalThis.fetch).toHaveBeenCalledTimes(1); // only fetched once
+		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
 	});
 
 	it('loadConfig handles fetch failure gracefully', async () => {

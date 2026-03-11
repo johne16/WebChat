@@ -52,10 +52,6 @@ export function setupDOM() {
 		{ tag: 'div', id: 'sticky-banner' },
 		{ tag: 'span', id: 'banner-message' },
 		{ tag: 'span', id: 'header-progress' },
-		{ tag: 'div', id: 'password-modal' },
-		{ tag: 'input', id: 'modal-passphrase' },
-		{ tag: 'button', id: 'modal-cancel' },
-		{ tag: 'button', id: 'modal-submit' },
 		{ tag: 'button', id: 'stop-agent-btn' }
 	];
 

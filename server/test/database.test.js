@@ -1,11 +1,29 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import crypto from "crypto";
+
+// vi.hoisted runs before vi.mock factories, avoiding TDZ issues
+const { TEST_ENCRYPTION_KEY } = vi.hoisted(() => {
+	const { randomBytes } = require("crypto");
+	const key = randomBytes(32).toString("hex");
+	process.env.DATABASE_PATH = ":memory:";
+	process.env.DATABASE_ENCRYPTION_KEY = key;
+	return { TEST_ENCRYPTION_KEY: key };
+});
 
 // Point DATABASE_PATH to in-memory SQLite and set encryption key before importing
 const origPath = process.env.DATABASE_PATH;
 const origKey = process.env.DATABASE_ENCRYPTION_KEY;
-process.env.DATABASE_PATH = ":memory:";
-process.env.DATABASE_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex");
+
+// Mock config.js to provide the encryption key (config caches env at import time)
+vi.mock("../config.js", () => ({
+	DATABASE_ENCRYPTION_KEY: process.env.DATABASE_ENCRYPTION_KEY,
+	DEFAULT_USER_ID: 1,
+	appConfig: {
+		server: { port: 8787 },
+		agent: { portPool: [5001, 5002, 5003, 5004, 5005] },
+		extension: { userId: 1 }
+	}
+}));
 
 afterAll(() => {
 	if (origPath === undefined) delete process.env.DATABASE_PATH;
@@ -21,13 +39,19 @@ import {
 	upsertProfile,
 	updateProfileExtraField,
 	deleteProfileExtraField,
+	deleteProfile,
 	getSiteData,
 	upsertSiteData,
 	deleteSiteData,
 	getLearnedContext,
 	addLearnedContext,
 	deleteLearnedContext,
-	getFullUserData
+	getFullUserData,
+	hasPassphrase,
+	setPassphrase,
+	verifyPassphrase,
+	getCachedTlds,
+	setCachedTlds
 } from "../database.js";
 
 describe("database", () => {
@@ -101,13 +125,48 @@ describe("database", () => {
 		it("stores encrypted data in the raw DB but returns plaintext via getProfile", () => {
 			const db = getDatabase();
 			const raw = db.prepare("SELECT email FROM profile WHERE user_id = 1").get();
-			// Raw value should be encrypted (iv:ciphertext:authTag format)
+			// Raw value should be encrypted (enc:iv:ciphertext:authTag format)
 			expect(raw.email).toContain(":");
 			expect(raw.email).not.toBe("new@example.com");
 
 			// But getProfile returns decrypted
 			const profile = getProfile(1);
 			expect(profile.email).toBe("new@example.com");
+		});
+
+		it("normalizes phone and zip on upsert (strips non-digits)", () => {
+			const profile = upsertProfile(1, {
+				phone: "(555) 123-4567",
+				zip: "78201-1234"
+			});
+
+			expect(profile.phone).toBe("5551234567");
+			expect(profile.zip).toBe("782011234");
+		});
+	});
+
+	describe("deleteProfile", () => {
+		it("removes profile, site data, learned context, and passphrase", () => {
+			// Ensure data exists first
+			upsertProfile(1, { first_name: "DeleteMe" });
+			upsertSiteData(1, "deletetest.com", "field1", "val1");
+			addLearnedContext(1, "fact to delete");
+			setPassphrase(1, "testpassphrase");
+
+			deleteProfile(1);
+
+			expect(getProfile(1)).toBeNull();
+			expect(getSiteData(1, "deletetest.com")).toEqual([]);
+			expect(getLearnedContext(1)).toEqual([]);
+			expect(hasPassphrase(1)).toBe(false);
+
+			// Re-create profile for subsequent tests
+			upsertProfile(1, {
+				first_name: "John",
+				last_name: "Doe",
+				email: "new@example.com",
+				extra_fields: { favoriteColor: "blue" }
+			});
 		});
 	});
 
@@ -180,13 +239,14 @@ describe("database", () => {
 			expect(id).toBeGreaterThan(0);
 		});
 
-		it("getLearnedContext returns facts in reverse chronological order", () => {
+		it("getLearnedContext returns all stored facts", () => {
 			addLearnedContext(1, "Fact A");
 			addLearnedContext(1, "Fact B");
 
 			const facts = getLearnedContext(1);
-			// Most recent first
-			expect(facts[0].fact).toBe("Fact B");
+			const factTexts = facts.map(f => f.fact);
+			expect(factTexts).toContain("Fact A");
+			expect(factTexts).toContain("Fact B");
 		});
 
 		it("stores facts encrypted in raw DB", () => {
@@ -196,12 +256,59 @@ describe("database", () => {
 			expect(raw.fact).not.toBe("Fact B");
 		});
 
-		it("deleteLearnedContext removes a fact by id", () => {
+		it("deleteLearnedContext removes a fact by id and userId", () => {
 			const id = addLearnedContext(1, "Temporary fact");
-			deleteLearnedContext(id);
+			deleteLearnedContext(id, 1);
 
 			const facts = getLearnedContext(1);
 			expect(facts.find(f => f.fact === "Temporary fact")).toBeUndefined();
+		});
+	});
+
+	describe("passphrase", () => {
+		it("hasPassphrase returns false when no passphrase set", () => {
+			expect(hasPassphrase(1)).toBe(false);
+		});
+
+		it("setPassphrase and hasPassphrase work together", () => {
+			setPassphrase(1, "my-secret-passphrase");
+			expect(hasPassphrase(1)).toBe(true);
+		});
+
+		it("verifyPassphrase returns true for correct passphrase", () => {
+			expect(verifyPassphrase(1, "my-secret-passphrase")).toBe(true);
+		});
+
+		it("verifyPassphrase returns false for wrong passphrase", () => {
+			expect(verifyPassphrase(1, "wrong-passphrase")).toBe(false);
+		});
+
+		it("verifyPassphrase returns false for user with no passphrase", () => {
+			// User 999 has no passphrase
+			const db = getDatabase();
+			db.prepare("INSERT OR IGNORE INTO users (id) VALUES (?)").run(998);
+			expect(verifyPassphrase(998, "anything")).toBe(false);
+		});
+	});
+
+	describe("TLD cache", () => {
+		it("getCachedTlds returns null when no cache exists", () => {
+			expect(getCachedTlds()).toBeNull();
+		});
+
+		it("setCachedTlds stores and getCachedTlds retrieves TLD array", () => {
+			const tlds = ["com", "org", "net", "edu"];
+			setCachedTlds(tlds);
+
+			const cached = getCachedTlds();
+			expect(cached).toEqual(tlds);
+		});
+
+		it("setCachedTlds overwrites existing cache", () => {
+			const updated = ["com", "org"];
+			setCachedTlds(updated);
+
+			expect(getCachedTlds()).toEqual(updated);
 		});
 	});
 

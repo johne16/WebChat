@@ -5,7 +5,8 @@ vi.mock('../config.js', () => ({
 	SERVER_BASE: 'http://localhost:8787',
 	getConfig: vi.fn(() => ({
 		providers: { defaultModel: 'gpt-5.2', default: 'openai' }
-	}))
+	})),
+	getUserId: vi.fn(() => 1)
 }));
 
 vi.mock('../utils.js', () => ({

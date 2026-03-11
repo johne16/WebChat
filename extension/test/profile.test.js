@@ -13,10 +13,11 @@ vi.mock('../ui.js', () => ({
 vi.mock('../config.js', () => ({
 	SERVER_BASE: 'http://localhost:8787',
 	getConfig: vi.fn(() => ({ extension: { userId: 1 } })),
+	getUserId: vi.fn(() => 1),
 	loadConfig: vi.fn(() => Promise.resolve())
 }));
 
-// profile.js accesses many DOM elements on load; provide them
+// profile.js accesses many DOM elements on load; provide them all
 function setupProfileDOM() {
 	document.body.innerHTML = `
 		<div id="message" class="message hidden"></div>
@@ -27,14 +28,26 @@ function setupProfileDOM() {
 		<form id="profile-form"></form>
 		<button id="delete-profile-btn"></button>
 		<div id="dynamic-fields"></div>
+		<div id="lock-section" hidden></div>
+		<form id="unlock-form"></form>
+		<a id="forgot-passphrase-link" href="#"></a>
+		<div id="create-passphrase-section" hidden></div>
+		<form id="create-passphrase-form"></form>
+		<button id="skip-passphrase-btn"></button>
+		<input id="unlock-passphrase" type="password" />
+		<input id="new-passphrase" type="password" />
+		<input id="confirm-passphrase" type="password" />
 	`;
 }
 
 // Mock fetch for server API calls
 vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
 	ok: true,
-	json: () => Promise.resolve({ profile: null })
+	json: () => Promise.resolve({ profile: null, exists: false })
 }));
+
+// Mock confirm/sessionStorage used by profile.js
+vi.stubGlobal('confirm', vi.fn(() => true));
 
 let isSensitiveField, SENSITIVE_FIELDS, STANDARD_FIELDS;
 

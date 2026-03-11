@@ -5,7 +5,8 @@ import { setupDOM } from './helpers.js';
 vi.mock('../config.js', () => ({
 	SERVER_BASE: 'http://localhost:8787',
 	loadConfig: vi.fn(() => Promise.resolve({ providers: {}, extension: {} })),
-	getConfig: vi.fn(() => ({ providers: {}, extension: { userId: 1 }, agent: { maxSteps: 20 } }))
+	getConfig: vi.fn(() => ({ providers: {}, extension: { userId: 1 }, agent: { maxSteps: 20 } })),
+	getUserId: vi.fn(() => 1)
 }));
 
 const mockSendToBot = vi.fn();
@@ -53,56 +54,65 @@ vi.mock('../agent.js', () => ({
 	cleanup: mockCleanup
 }));
 
+const mockAddMessage = vi.fn();
+const mockAddMetaMessage = vi.fn();
+const mockShowThinkingIndicator = vi.fn();
+const mockRemoveThinkingIndicator = vi.fn();
+const mockUpdateHeaderProgress = vi.fn();
+const mockRenderInputForm = vi.fn();
+const mockRemoveCurrentForm = vi.fn();
+const mockShowStickyBanner = vi.fn();
+const mockHideStickyBanner = vi.fn();
+const mockShowStopButton = vi.fn();
+const mockHideStopButton = vi.fn();
+const mockOnStopAgentClick = vi.fn();
+
 vi.mock('../ui.js', () => ({
-	addMessage: vi.fn(),
-	addMetaMessage: vi.fn(),
-	showThinkingIndicator: vi.fn(),
-	removeThinkingIndicator: vi.fn(),
-	updateHeaderProgress: vi.fn(),
-	renderInputForm: vi.fn(),
-	removeCurrentForm: vi.fn(),
-	showStickyBanner: vi.fn(),
-	hideStickyBanner: vi.fn(),
-	showStopButton: vi.fn(),
-	hideStopButton: vi.fn(),
-	onStopAgentClick: vi.fn()
+	addMessage: mockAddMessage,
+	addMetaMessage: mockAddMetaMessage,
+	showThinkingIndicator: mockShowThinkingIndicator,
+	removeThinkingIndicator: mockRemoveThinkingIndicator,
+	updateHeaderProgress: mockUpdateHeaderProgress,
+	renderInputForm: mockRenderInputForm,
+	removeCurrentForm: mockRemoveCurrentForm,
+	showStickyBanner: mockShowStickyBanner,
+	hideStickyBanner: mockHideStickyBanner,
+	showStopButton: mockShowStopButton,
+	hideStopButton: mockHideStopButton,
+	onStopAgentClick: mockOnStopAgentClick
 }));
 
-describe('panel.js', () => {
-	let form, input;
+function setupPanelDOM() {
+	setupDOM();
 
+	const form = document.createElement('form');
+	form.id = 'form';
+	const input = document.createElement('input');
+	input.id = 'prompt';
+	form.appendChild(input);
+	document.body.appendChild(form);
+
+	const closeBtn = document.createElement('button');
+	closeBtn.id = 'close';
+	document.body.appendChild(closeBtn);
+
+	const optionsBtn = document.createElement('button');
+	optionsBtn.id = 'open-options';
+	document.body.appendChild(optionsBtn);
+
+	const bannerContinue = document.createElement('button');
+	bannerContinue.id = 'banner-continue';
+	document.body.appendChild(bannerContinue);
+
+	return { form, input };
+}
+
+describe('panel.js', () => {
 	beforeEach(async () => {
 		vi.clearAllMocks();
-		// Reset fetch mock
 		vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) })));
-
-		// Setup minimal panel DOM
-		setupDOM();
-
-		// Additional panel-specific DOM elements
-		form = document.createElement('form');
-		form.id = 'form';
-		input = document.createElement('input');
-		input.id = 'prompt';
-		form.appendChild(input);
-		document.body.appendChild(form);
-
-		const closeBtn = document.createElement('button');
-		closeBtn.id = 'close';
-		document.body.appendChild(closeBtn);
-
-		const optionsBtn = document.createElement('button');
-		optionsBtn.id = 'open-options';
-		document.body.appendChild(optionsBtn);
-
-		const bannerContinue = document.createElement('button');
-		bannerContinue.id = 'banner-continue';
-		document.body.appendChild(bannerContinue);
-
-		// Reset modules to re-run panel.js with fresh DOM
+		setupPanelDOM();
 		vi.resetModules();
-
-		// Re-mock chrome.tabs.query to return a tab
 		chrome.tabs.query.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
 		chrome.storage.local.get.mockImplementation((keys) => {
 			if (Array.isArray(keys) && keys.includes('isTestingMode')) {
@@ -122,14 +132,113 @@ describe('panel.js', () => {
 	});
 
 	it('calls addMetaMessage on init', async () => {
-		const { addMetaMessage } = await import('../ui.js');
 		await import('../panel.js');
-		expect(addMetaMessage).toHaveBeenCalledWith(expect.stringContaining('Ctrl+Shift+Y'));
+		expect(mockAddMetaMessage).toHaveBeenCalledWith(expect.stringContaining('Ctrl+Shift+Y'));
 	});
 
 	it('registers onStopAgentClick handler', async () => {
-		const { onStopAgentClick } = await import('../ui.js');
 		await import('../panel.js');
-		expect(onStopAgentClick).toHaveBeenCalledWith(expect.any(Function));
+		expect(mockOnStopAgentClick).toHaveBeenCalledWith(expect.any(Function));
+	});
+
+	it('testing mode echoes messages', async () => {
+		chrome.storage.local.get.mockImplementation((keys) => {
+			if (Array.isArray(keys) && keys.includes('isTestingMode')) {
+				return Promise.resolve({ isTestingMode: true });
+			}
+			return Promise.resolve({});
+		});
+		await import('../panel.js');
+
+		const form = document.getElementById('form');
+		const input = document.getElementById('prompt');
+		input.value = 'hello test';
+		form.dispatchEvent(new Event('submit', { cancelable: true }));
+
+		// Wait for async handler to execute
+		await new Promise(r => setTimeout(r, 0));
+
+		expect(mockAddMessage).toHaveBeenCalledWith('user', 'hello test');
+		expect(mockAddMessage).toHaveBeenCalledWith('bot', 'Echo: hello test');
+	});
+
+	it('simple intent routes through sendToBot', async () => {
+		mockDetectIntent.mockResolvedValue({ intent: 'simple' });
+		mockSendToBot.mockResolvedValue({ text: 'Bot reply' });
+
+		await import('../panel.js');
+
+		const form = document.getElementById('form');
+		const input = document.getElementById('prompt');
+		input.value = 'What is this page?';
+		form.dispatchEvent(new Event('submit', { cancelable: true }));
+
+		await new Promise(r => setTimeout(r, 50));
+
+		expect(mockShowThinkingIndicator).toHaveBeenCalled();
+		expect(mockSendToBot).toHaveBeenCalledWith('What is this page?', 'https://example.com');
+		expect(mockRemoveThinkingIndicator).toHaveBeenCalled();
+		expect(mockAddMessage).toHaveBeenCalledWith('bot', 'Bot reply');
+	});
+
+	it('research intent routes through runReActLoop', async () => {
+		mockDetectIntent.mockResolvedValue({ intent: 'research' });
+		mockRunReActLoop.mockResolvedValue({ answer: 'Research result', iterations: 2 });
+
+		await import('../panel.js');
+
+		const form = document.getElementById('form');
+		const input = document.getElementById('prompt');
+		input.value = 'Compare X and Y';
+		form.dispatchEvent(new Event('submit', { cancelable: true }));
+
+		await new Promise(r => setTimeout(r, 50));
+
+		expect(mockRunReActLoop).toHaveBeenCalled();
+		expect(mockAddMessage).toHaveBeenCalledWith('bot', 'Research result');
+	});
+
+	it('agent intent without URL shows error message', async () => {
+		mockDetectIntent.mockResolvedValue({ intent: 'agent', url: null, confidence: 'high' });
+
+		await import('../panel.js');
+
+		const form = document.getElementById('form');
+		const input = document.getElementById('prompt');
+		input.value = 'Sign me up';
+		form.dispatchEvent(new Event('submit', { cancelable: true }));
+
+		await new Promise(r => setTimeout(r, 50));
+
+		expect(mockAddMessage).toHaveBeenCalledWith('bot', expect.stringContaining("couldn't determine the target URL"));
+	});
+
+	it('agent intent without profile shows setup message', async () => {
+		mockDetectIntent.mockResolvedValue({ intent: 'agent', url: 'https://example.com', confidence: 'high' });
+		mockIsProfileUnlocked.mockResolvedValue(false);
+
+		await import('../panel.js');
+
+		const form = document.getElementById('form');
+		const input = document.getElementById('prompt');
+		input.value = 'Sign me up at https://example.com';
+		form.dispatchEvent(new Event('submit', { cancelable: true }));
+
+		await new Promise(r => setTimeout(r, 50));
+
+		expect(mockAddMessage).toHaveBeenCalledWith('bot', expect.stringContaining('No profile found'));
+	});
+
+	it('does not submit empty messages', async () => {
+		await import('../panel.js');
+
+		const form = document.getElementById('form');
+		const input = document.getElementById('prompt');
+		input.value = '   ';
+		form.dispatchEvent(new Event('submit', { cancelable: true }));
+
+		await new Promise(r => setTimeout(r, 0));
+
+		expect(mockAddMessage).not.toHaveBeenCalled();
 	});
 });

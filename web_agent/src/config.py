@@ -48,11 +48,12 @@ class Config:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", _providers.get("defaultModel"))
-    TEMPERATURE: float = float(os.getenv("TEMPERATURE", str(_llm.get("temperature", 0.1))))
-    MAX_TOKENS: int = int(os.getenv("MAX_TOKENS", str(_llm.get("maxTokens", 2000))))
+    ANTHROPIC_MODEL: str = os.getenv("ANTHROPIC_MODEL", _providers.get("defaultModel"))
+    TEMPERATURE: float = float(os.getenv("TEMPERATURE", str(_llm.get("temperature"))))
+    MAX_TOKENS: int = int(os.getenv("MAX_TOKENS", str(_llm.get("maxTokens"))))
 
     # Server Configuration
-    PORT: int = int(os.getenv("PORT", str(_agent.get("defaultPort", 5001))))
+    PORT: int = int(os.getenv("PORT", str(_agent.get("defaultPort"))))
 
     # Development Settings
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
@@ -61,44 +62,37 @@ class Config:
     )
 
     # Browser Settings
-    HEADLESS: bool = os.getenv("HEADLESS", str(_browser.get("headless", False))).lower() == "true"
-    BROWSER_TIMEOUT: int = int(os.getenv("BROWSER_TIMEOUT", str(_browser.get("timeoutMs", 30000))))
-    NAVIGATION_TIMEOUT: int = int(os.getenv("NAVIGATION_TIMEOUT", str(_browser.get("navigationTimeoutMs", 5000))))
-    WAIT_POLICY: str = os.getenv("WAIT_POLICY", _browser.get("waitPolicy", "networkidle"))
-    SCROLL_PIXELS: int = int(os.getenv("SCROLL_PIXELS", str(_browser.get("scrollPixels", 500))))
-    CONTENT_MAX_CHARS: int = int(os.getenv("CONTENT_MAX_CHARS", str(_browser.get("contentMaxChars", 3000))))
-    LINK_TEXT_MAX_CHARS: int = int(os.getenv("LINK_TEXT_MAX_CHARS", str(_browser.get("linkTextMaxChars", 100))))
-    BUTTON_TEXT_MAX_CHARS: int = int(os.getenv("BUTTON_TEXT_MAX_CHARS", str(_browser.get("buttonTextMaxChars", 100))))
-    CHARS_PER_TOKEN: int = int(os.getenv("CHARS_PER_TOKEN", str(_browser.get("charsPerToken", 4))))
+    HEADLESS: bool = os.getenv("HEADLESS", str(_browser.get("headless"))).lower() == "true"
+    BROWSER_TIMEOUT: int = int(os.getenv("BROWSER_TIMEOUT", str(_browser.get("timeoutMs"))))
+    NAVIGATION_TIMEOUT: int = int(os.getenv("NAVIGATION_TIMEOUT", str(_browser.get("navigationTimeoutMs"))))
+    WAIT_POLICY: str = os.getenv("WAIT_POLICY", _browser.get("waitPolicy"))
+    SCROLL_PIXELS: int = int(os.getenv("SCROLL_PIXELS", str(_browser.get("scrollPixels"))))
+    CONTENT_MAX_CHARS: int = int(os.getenv("CONTENT_MAX_CHARS", str(_browser.get("contentMaxChars"))))
+    LINK_TEXT_MAX_CHARS: int = int(os.getenv("LINK_TEXT_MAX_CHARS", str(_browser.get("linkTextMaxChars"))))
+    BUTTON_TEXT_MAX_CHARS: int = int(os.getenv("BUTTON_TEXT_MAX_CHARS", str(_browser.get("buttonTextMaxChars"))))
+    CHARS_PER_TOKEN: int = int(os.getenv("CHARS_PER_TOKEN", str(_browser.get("charsPerToken"))))
 
     # Allowed JavaScript APIs
-    ALLOWED_APIS: List[str] = _agent.get("allowedAPIs", [
-        "fillField",
-        "clickButton",
-        "selectOption",
-        "selectRadio",
-        "checkCheckbox",
-        "waitForElement",
-    ])
+    ALLOWED_APIS: List[str] = _agent.get("allowedAPIs")
 
     # Error Handling
-    MAX_RETRY_ATTEMPTS: int = int(os.getenv("MAX_RETRY_ATTEMPTS", str(_agent.get("maxRetryAttempts", 1))))
+    MAX_RETRY_ATTEMPTS: int = int(os.getenv("MAX_RETRY_ATTEMPTS", str(_agent.get("maxRetryAttempts"))))
 
     # Autonomous Agent Settings
-    MAX_AGENT_STEPS: int = int(os.getenv("MAX_AGENT_STEPS", str(_agent.get("maxSteps", 20))))
+    MAX_AGENT_STEPS: int = int(os.getenv("MAX_AGENT_STEPS", str(_agent.get("maxSteps"))))
     CONSECUTIVE_FAILURE_THRESHOLD: int = int(
-        os.getenv("CONSECUTIVE_FAILURE_THRESHOLD", str(_agent.get("consecutiveFailureThreshold", 3)))
+        os.getenv("CONSECUTIVE_FAILURE_THRESHOLD", str(_agent.get("consecutiveFailureThreshold")))
     )
     RECENT_ACTION_LOOKBACK: int = int(
-        os.getenv("RECENT_ACTION_LOOKBACK", str(_agent.get("recentActionLookback", 5)))
+        os.getenv("RECENT_ACTION_LOOKBACK", str(_agent.get("recentActionLookback")))
     )
 
     # Session cleanup
-    SESSION_TTL_DAYS: int = int(os.getenv("SESSION_TTL_DAYS", str(_agent.get("sessionTtlDays", 7))))
+    SESSION_TTL_DAYS: int = int(os.getenv("SESSION_TTL_DAYS", str(_agent.get("sessionTtlDays"))))
 
     # Execution Engine
-    MAX_CODE_LENGTH: int = int(os.getenv("MAX_CODE_LENGTH", str(_execution.get("maxCodeLength", 5000))))
-    EXECUTION_WAIT_TIMEOUT: int = int(os.getenv("EXECUTION_WAIT_TIMEOUT", str(_execution.get("waitTimeoutMs", 5000))))
+    MAX_CODE_LENGTH: int = int(os.getenv("MAX_CODE_LENGTH", str(_execution.get("maxCodeLength"))))
+    EXECUTION_WAIT_TIMEOUT: int = int(os.getenv("EXECUTION_WAIT_TIMEOUT", str(_execution.get("waitTimeoutMs"))))
 
     # Paths
     BASE_DIR: Path = Path(__file__).parent.parent

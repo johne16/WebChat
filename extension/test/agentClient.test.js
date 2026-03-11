@@ -156,7 +156,8 @@ describe('agentClient.js', () => {
 			agentClient.addSSEHandler('agent-status', handler);
 
 			es._emit('agent-status', { status: 'running' });
-			expect(handler).toHaveBeenCalledWith(expect.objectContaining({ data: expect.any(String) }));
+			// Handler receives parsed data object, not raw event
+			expect(handler).toHaveBeenCalledWith({ status: 'running' });
 		});
 
 		it('removeSSEHandler prevents handler from firing', () => {

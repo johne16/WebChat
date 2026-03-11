@@ -183,21 +183,30 @@ describe('ui.js', () => {
 		});
 	});
 
-	describe('showPasswordModal / hidePasswordModal', () => {
-		it('shows modal and clears input', () => {
-			const modal = document.getElementById('password-modal');
-			const input = document.getElementById('modal-passphrase');
-			input.value = 'old';
-			ui.showPasswordModal();
-			expect(modal.classList.contains('visible')).toBe(true);
-			expect(input.value).toBe('');
+	describe('showStopButton / hideStopButton', () => {
+		it('shows the stop button', () => {
+			ui.showStopButton();
+			const btn = document.getElementById('stop-agent-btn');
+			expect(btn.hidden).toBe(false);
 		});
 
-		it('hides modal and clears input', () => {
-			ui.showPasswordModal();
-			ui.hidePasswordModal();
-			const modal = document.getElementById('password-modal');
-			expect(modal.classList.contains('visible')).toBe(false);
+		it('hides the stop button', () => {
+			ui.showStopButton();
+			ui.hideStopButton();
+			const btn = document.getElementById('stop-agent-btn');
+			expect(btn.hidden).toBe(true);
+		});
+	});
+
+	describe('onStopAgentClick', () => {
+		it('registers a click handler on the stop button', async () => {
+			const handler = vi.fn();
+			ui.onStopAgentClick(handler);
+			const btn = document.getElementById('stop-agent-btn');
+			btn.click();
+			// handler is called asynchronously via async wrapper
+			await new Promise(r => setTimeout(r, 0));
+			expect(handler).toHaveBeenCalled();
 		});
 	});
 

@@ -7,7 +7,7 @@ import { getConfig } from './config.js';
 
 // Intent detection uses a small, cheap model regardless of user's model selection.
 // Read from config at call time (not module init) so loadConfig() has completed.
-function getIntentModel() { return getConfig()?.providers?.intentModel || 'gpt-4o-mini'; }
+function getIntentModel() { return getConfig()?.providers?.intentModel; }
 function getIntentProvider() { return getConfig()?.providers?.intentProvider; }
 
 // Action verbs that indicate agent tasks (single source of truth)

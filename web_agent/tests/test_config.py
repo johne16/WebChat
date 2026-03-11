@@ -55,3 +55,5 @@ class TestGoalStatus:
         assert GoalStatus.FAILED == "failed"
         assert GoalStatus.NEEDS_INPUT == "needs_input"
         assert GoalStatus.AWAITING_USER_ACTION == "awaiting_user_action"
+        assert GoalStatus.STARTED == "started"
+        assert GoalStatus.STEP_COMPLETED == "step_completed"

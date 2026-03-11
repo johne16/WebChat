@@ -11,7 +11,8 @@ vi.mock('../config.js', () => ({
 			profile: { defaultCountry: 'United States' },
 			userId: 1
 		}
-	}))
+	})),
+	getUserId: vi.fn(() => 1)
 }));
 
 const mockStartAgent = vi.fn();
@@ -33,7 +34,7 @@ vi.mock('../utils.js', () => ({
 
 let transformProfileForAgent, startAgentSession,
 	executeAgentGoal, provideAgentInput, stopAgentSession,
-	isProfileUnlocked, hasActiveSession, clearAgentSession, getAgentSession;
+	isProfileUnlocked, hasActiveSession, clearAgentSession, getAgentSession, cleanup;
 
 describe('agent.js', () => {
 	beforeEach(async () => {
@@ -54,6 +55,7 @@ describe('agent.js', () => {
 		hasActiveSession = agent.hasActiveSession;
 		clearAgentSession = agent.clearAgentSession;
 		getAgentSession = agent.getAgentSession;
+		cleanup = agent.cleanup;
 	});
 
 	describe('isProfileUnlocked', () => {
@@ -164,6 +166,37 @@ describe('agent.js', () => {
 		});
 	});
 
+	describe('provideAgentInput', () => {
+		it('throws when no active agent session', async () => {
+			await expect(provideAgentInput({ email: 'a@b.com' })).rejects.toThrow('No active agent session');
+		});
+
+		it('provides input to agent and saves site data', async () => {
+			chrome.storage.local.get.mockImplementation(() =>
+				Promise.resolve({ agentProvider: 'openai', agentModelType: 'gpt-5.2' })
+			);
+
+			mockStartAgent.mockResolvedValue({ port: 5003 });
+			await startAgentSession('task-pi');
+
+			mockExecuteGoal.mockResolvedValue({ status: 'running', sessionId: 'sess-pi' });
+			await executeAgentGoal('Sign up', 'https://example.com');
+
+			mockProvideInput.mockResolvedValue({ status: 'running' });
+
+			const result = await provideAgentInput({ username: 'bob' });
+
+			expect(mockProvideInput).toHaveBeenCalledWith(
+				5003,
+				'sess-pi',
+				{ username: 'bob' },
+				'openai',
+				'gpt-5.2'
+			);
+			expect(result.status).toBe('running');
+		});
+	});
+
 	describe('stopAgentSession', () => {
 		it('stops agent and clears session', async () => {
 			mockStartAgent.mockResolvedValue({ port: 5003 });
@@ -184,6 +217,23 @@ describe('agent.js', () => {
 			await stopAgentSession();
 
 			expect(hasActiveSession()).toBe(false);
+		});
+	});
+
+	describe('cleanup', () => {
+		it('stops agent session via cleanup', async () => {
+			mockStartAgent.mockResolvedValue({ port: 5005 });
+			await startAgentSession('task-cleanup');
+			mockStopAgent.mockResolvedValue({ success: true });
+
+			await cleanup();
+
+			expect(mockStopAgent).toHaveBeenCalledWith(5005);
+			expect(hasActiveSession()).toBe(false);
+		});
+
+		it('is safe when no session exists', async () => {
+			await expect(cleanup()).resolves.not.toThrow();
 		});
 	});
 

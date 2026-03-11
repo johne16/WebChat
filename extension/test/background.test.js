@@ -41,12 +41,14 @@ describe('background.js', () => {
 
 	it('registers onInstalled listener that sets default storage', () => {
 		expect(capturedListeners.onInstalled).not.toBeNull();
-		capturedListeners.onInstalled();
+		capturedListeners.onInstalled({ reason: 'install' });
 		expect(chrome.storage.local.set).toHaveBeenCalledWith(
 			expect.objectContaining({
 				isTestingMode: false,
-				provider: 'openai',
-				modelType: 'gpt-5.2'
+				provider: 'anthropic',
+				modelType: 'claude-haiku-4-5',
+				agentProvider: 'anthropic',
+				agentModelType: 'claude-haiku-4-5'
 			})
 		);
 	});
@@ -87,12 +89,12 @@ describe('background.js', () => {
 	});
 
 	it('handles WEBCHAT_CLOSE message', async () => {
-		chrome.tabs.query.mockResolvedValue([{ id: 5 }]);
+		// Source uses callback-style chrome.tabs.query(opts, callback)
+		chrome.tabs.query.mockImplementation((opts, cb) => cb([{ id: 5 }]));
 		capturedListeners.onMessage({ type: 'WEBCHAT_CLOSE' });
-		await new Promise(r => setTimeout(r, 0));
 		expect(chrome.tabs.query).toHaveBeenCalled();
 		expect(chrome.sidePanel.setOptions).toHaveBeenCalledWith(
-			expect.objectContaining({ enabled: false })
+			expect.objectContaining({ tabId: 5, enabled: false })
 		);
 	});
 

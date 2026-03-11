@@ -1,18 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mockCreate = vi.fn();
+const { mockCreate } = vi.hoisted(() => ({ mockCreate: vi.fn() }));
 vi.mock("openai", () => {
-	return {
-		default: class MockOpenAI {
-			constructor() {
-				this.chat = {
-					completions: {
-						create: mockCreate
-					}
-				};
-			}
+	class APIError extends Error {}
+	class MockOpenAI {
+		constructor() {
+			this.chat = {
+				completions: {
+					create: mockCreate
+				}
+			};
 		}
-	};
+	}
+	MockOpenAI.APIError = APIError;
+	return { default: MockOpenAI };
 });
 
 import { chat } from "../../providers/openai.js";
@@ -34,13 +35,17 @@ describe("providers/openai", () => {
 		expect(result.usage).toEqual({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 });
 	});
 
-	it("passes model and messages to the API", async () => {
+	it("passes model, messages, and max_completion_tokens to the API", async () => {
 		mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "" } }] });
 
 		const msgs = [{ role: "system", content: "sys" }, { role: "user", content: "q" }];
 		await chat("gpt-5-mini", msgs);
 
-		expect(mockCreate).toHaveBeenCalledWith({ model: "gpt-5-mini", messages: msgs });
+		expect(mockCreate).toHaveBeenCalledWith({
+			model: "gpt-5-mini",
+			messages: msgs,
+			max_completion_tokens: 4096
+		});
 	});
 
 	it("returns empty string when choices are missing", async () => {

@@ -15,7 +15,8 @@ import {
 	getAgent,
 	getRunningAgents,
 	getAvailablePorts,
-	killAllAgents
+	killAllAgents,
+	forwardContinueSession
 } from "../agentManager.js";
 
 function createMockProcess() {
@@ -91,14 +92,20 @@ describe("agentManager", () => {
 			// Health check always fails
 			globalThis.fetch.mockRejectedValue(new Error("ECONNREFUSED"));
 
-			const spawnPromise = spawnAgent("task-2");
+			// Catch rejection immediately to prevent unhandled rejection warning
+			const spawnPromise = spawnAgent("task-2").catch(e => e);
 
 			// Advance through all health check attempts (30 * 1000ms)
 			for (let i = 0; i < 31; i++) {
 				await vi.advanceTimersByTimeAsync(1100);
 			}
 
-			await expect(spawnPromise).rejects.toThrow("health check timeout");
+			const error = await spawnPromise;
+			expect(error).toBeInstanceOf(Error);
+			expect(error.message).toContain("health check timeout");
+
+			// Drain any remaining timers
+			await vi.runAllTimersAsync();
 		});
 
 		it("throws when no ports are available", async () => {
@@ -163,6 +170,97 @@ describe("agentManager", () => {
 			expect(agents[0]).toHaveProperty("runningMs");
 
 			killAgent(5001);
+		});
+	});
+
+	describe("forwardContinueSession", () => {
+		it("sends POST to agent continue-session endpoint and returns JSON", async () => {
+			globalThis.fetch.mockResolvedValueOnce({
+				ok: true,
+				json: () => Promise.resolve({ status: "running" })
+			});
+
+			const result = await forwardContinueSession(5001, "sess-1", { email: "a@b.com" }, "openai", "gpt-5.2");
+
+			expect(globalThis.fetch).toHaveBeenCalledWith(
+				"http://localhost:5001/api/session/sess-1/continue",
+				expect.objectContaining({
+					method: "POST",
+					headers: { "Content-Type": "application/json" }
+				})
+			);
+			const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
+			expect(body.additionalData).toEqual({ email: "a@b.com" });
+			expect(body.provider).toBe("openai");
+			expect(body.model).toBe("gpt-5.2");
+			expect(result.status).toBe("running");
+		});
+
+		it("throws when agent responds with error status", async () => {
+			globalThis.fetch.mockResolvedValueOnce({ ok: false, status: 500 });
+
+			await expect(forwardContinueSession(5001, "sess-1", {})).rejects.toThrow("Agent responded with 500");
+		});
+
+		it("defaults additionalData to empty object when null", async () => {
+			globalThis.fetch.mockResolvedValueOnce({
+				ok: true,
+				json: () => Promise.resolve({ status: "running" })
+			});
+
+			await forwardContinueSession(5001, "sess-1", null, "anthropic", "claude-haiku-4-5");
+
+			const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
+			expect(body.additionalData).toEqual({});
+		});
+	});
+
+	describe("crash restart", () => {
+		it("restarts agent once on unexpected exit", async () => {
+			const proc = createMockProcess();
+			mockSpawn.mockReturnValueOnce(proc);
+			globalThis.fetch.mockResolvedValue({ ok: true });
+
+			const p = spawnAgent("task-crash");
+			await vi.advanceTimersByTimeAsync(1100);
+			await p;
+
+			// Spawn mock for restart
+			const proc2 = createMockProcess();
+			mockSpawn.mockReturnValueOnce(proc2);
+
+			// Simulate unexpected exit (code 1)
+			proc.emit("exit", 1, null);
+			await vi.advanceTimersByTimeAsync(1100);
+
+			// Agent should still be tracked (restarted)
+			expect(hasAgent(5001)).toBe(true);
+			const agent = getAgent(5001);
+			expect(agent.restartCount).toBe(1);
+
+			killAgent(5001);
+		});
+
+		it("removes agent after exceeding max restarts", async () => {
+			const proc = createMockProcess();
+			mockSpawn.mockReturnValueOnce(proc);
+			globalThis.fetch.mockResolvedValue({ ok: true });
+
+			const p = spawnAgent("task-noretry");
+			await vi.advanceTimersByTimeAsync(1100);
+			await p;
+
+			// First restart
+			const proc2 = createMockProcess();
+			mockSpawn.mockReturnValueOnce(proc2);
+			proc.emit("exit", 1, null);
+			await vi.advanceTimersByTimeAsync(1100);
+
+			// Second crash: should not restart (MAX_AGENT_RESTARTS = 1)
+			proc2.emit("exit", 1, null);
+			await vi.advanceTimersByTimeAsync(100);
+
+			expect(hasAgent(5001)).toBe(false);
 		});
 	});
 

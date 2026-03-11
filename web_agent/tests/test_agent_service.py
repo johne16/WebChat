@@ -7,7 +7,7 @@ from httpx import AsyncClient, ASGITransport
 import tempfile
 from pathlib import Path
 
-from src.agent_service import app, AppConfig
+from src.agent_service import app, AppConfig, AgentManager
 from src.memory import SessionMemory
 
 
@@ -30,6 +30,47 @@ def set_app_config():
 def client():
     """Create test client"""
     return TestClient(app)
+
+
+class TestAgentManager:
+    """Tests for AgentManager class"""
+
+    @pytest.mark.asyncio
+    async def test_get_returns_none_for_unknown_session(self):
+        mgr = AgentManager()
+        result = await mgr.get("nonexistent")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_set_and_get(self):
+        mgr = AgentManager()
+        mock_agent = MagicMock()
+        await mgr.set("sess-1", mock_agent)
+        result = await mgr.get("sess-1")
+        assert result is mock_agent
+
+    @pytest.mark.asyncio
+    async def test_has_returns_false_initially(self):
+        mgr = AgentManager()
+        assert await mgr.has("sess-1") is False
+
+    @pytest.mark.asyncio
+    async def test_has_returns_true_after_set(self):
+        mgr = AgentManager()
+        await mgr.set("sess-1", MagicMock())
+        assert await mgr.has("sess-1") is True
+
+    @pytest.mark.asyncio
+    async def test_remove_deletes_agent(self):
+        mgr = AgentManager()
+        await mgr.set("sess-1", MagicMock())
+        await mgr.remove("sess-1")
+        assert await mgr.has("sess-1") is False
+
+    @pytest.mark.asyncio
+    async def test_remove_is_safe_for_unknown_session(self):
+        mgr = AgentManager()
+        await mgr.remove("nonexistent")  # should not raise
 
 
 class TestHealthEndpoints:
