@@ -5,6 +5,7 @@ const log = document.getElementById('log');
 const stickyBanner = document.getElementById('sticky-banner');
 const bannerMessage = document.getElementById('banner-message');
 const headerProgress = document.getElementById('header-progress');
+const serviceStatusEl = document.getElementById('service-status');
 
 let currentInlineForm = null;
 let thinkingRow = null;
@@ -68,6 +69,33 @@ export function addStepMessage(stepText, prefix = '\uD83D\uDD0D') {
 	log.scrollTop = log.scrollHeight;
 }
 
+
+/**
+ * Update service status indicator dot
+ * @param {string} serverStatus - 'running'|'stopped'|'starting'|'error'|'unavailable'|'unknown'
+ * @param {string} crawlStatus - 'running'|'stopped'|'starting'|'error'|'unavailable'|'unknown'
+ */
+export function updateServiceStatus(serverStatus, crawlStatus) {
+	if (!serviceStatusEl) return;
+	// Overall status: both running = green, any starting = yellow, any error/stopped = red
+	let overall;
+	if (serverStatus === 'running' && crawlStatus === 'running') {
+		overall = 'running';
+	} else if (serverStatus === 'unavailable' || crawlStatus === 'unavailable') {
+		overall = 'unavailable';
+	} else if (serverStatus === 'starting' || crawlStatus === 'starting') {
+		overall = 'starting';
+	} else if (serverStatus === 'error' || crawlStatus === 'error') {
+		overall = 'error';
+	} else if (serverStatus === 'stopped' || crawlStatus === 'stopped') {
+		overall = 'stopped';
+	} else {
+		overall = 'unavailable';
+	}
+
+	serviceStatusEl.className = `service-status ${overall}`;
+	serviceStatusEl.title = `Server: ${serverStatus}, Crawl: ${crawlStatus}`;
+}
 
 /**
  * Update header progress indicator text

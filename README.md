@@ -18,7 +18,7 @@ WebChat is a Chromium extension that adds an AI-powered side panel to help users
 2. Create an environment file at `./server/.env`:
    ```
    OPENAI_API_KEY=your_openai_api_key_here
-   ANTHROPIC_API_KEY=your_anthropic_api_key_here  # optional
+   ANTHROPIC_API_KEY=your_anthropic_api_key_here
    BRAVE_SEARCH_API_KEY=your_brave_search_api_key_here
    DATABASE_ENCRYPTION_KEY=<generate with: openssl rand -hex 32>
    PORT=8787
@@ -26,7 +26,7 @@ WebChat is a Chromium extension that adds an AI-powered side panel to help users
 
    **Notes:**
    - Get your Brave Search API key from [https://brave.com/search/api/](https://brave.com/search/api/)
-   - `ANTHROPIC_API_KEY` is only needed if you select an Anthropic model in settings
+   - Only one LLM API key is necessary, if you do not intend to use a certain provider. Based on the developer's user experience, the extension works faster with Anthropic models.
    - `DATABASE_ENCRYPTION_KEY` encrypts sensitive profile data at rest in SQLite. Generate it once and keep it safe; losing this key makes existing data unrecoverable. The server will not start without it.
    - `openssl rand -hex 32` is a bash command that prints the key to stdout. Run it in Git Bash or WSL on Windows (PowerShell does not include OpenSSL by default). Copy the output into your `.env` file.
 
@@ -42,11 +42,51 @@ WebChat is a Chromium extension that adds an AI-powered side panel to help users
    pip install -r requirements.txt
    ```
 
-## Running the Extension
+## Installing the Extension
 
-The extension requires two services running. Start each in a separate terminal:
+1. Open your browser and go to `chrome://extensions`
+2. Enable **Developer mode** (toggle at top right)
+3. Click **Load unpacked**
+4. Select the `./extension` directory
+5. The extension appears as **WebChat**
+6. **Note your extension ID** from the `chrome://extensions` page (you'll need it for auto-start setup)
 
-### Terminal 1: Crawl4AI
+**Keyboard shortcut:** `Ctrl+Shift+Y` (Windows) / `Command+Shift+Y` (Mac)
+
+## Running the Services
+
+There are two ways to run the backend services: automatic (recommended) or manual.
+
+### Option A: Auto-Start via Native Messaging (recommended)
+
+The extension auto-starts the server and Crawl4AI service when you open the side panel, and stops them when you close it. This uses Chrome's Native Messaging API. A status dot in the panel header shows service health (green = running, yellow = starting, red = error, gray = unavailable).
+
+**One-time setup:**
+
+```bash
+# Register the native messaging host (use your extension ID from chrome://extensions)
+node native_host/setup.js --id=<your-extension-id>
+```
+
+This writes a host manifest and registers it in the Windows registry for Chrome and Brave. After running this, reload the extension at `chrome://extensions`.
+
+**Lifecycle:** Services start when the first panel opens and stop when the last panel closes. If you have panels open in multiple tabs, services stay running until all of them are closed.
+
+**To unregister:**
+
+```bash
+node native_host/setup.js --uninstall
+```
+
+**Logs:** `native_host/logs/service_manager.log`
+
+**Configuration:** The `nativeHost` section in `webchat.config.json` controls health check timing. You can also set `nativeHost.pythonPath` if `python` isn't on your system PATH.
+
+### Option B: Manual Start (two terminals)
+
+If you prefer not to use native messaging, or if auto-start isn't set up, start each service in a separate terminal:
+
+**Terminal 1: Crawl4AI**
 
 ```bash
 cd crawl_service
@@ -55,7 +95,7 @@ python crawl_service.py
 
 The Crawl4AI service must be running on port 11235 for page content extraction.
 
-### Terminal 2: WebChat Server
+**Terminal 2: WebChat Server**
 
 ```bash
 cd server
@@ -68,15 +108,7 @@ The server listens on port 8787 (configurable via `.env`). It handles:
 - Crawl4AI proxying
 - Agent process spawning and management (agents are spawned on-demand when needed)
 
-## Installing the Extension
-
-1. Open your browser and go to `chrome://extensions`
-2. Enable **Developer mode** (toggle at top right)
-3. Click **Load unpacked**
-4. Select the `./extension` directory
-5. The extension appears as **WebChat**
-
-**Keyboard shortcut:** `Ctrl+Shift+Y` (Windows) / `Command+Shift+Y` (Mac)
+The panel's status dot will show gray ("unavailable") if native messaging isn't registered, but the extension works normally as long as both services are running.
 
 ## Architecture
 
@@ -190,8 +222,9 @@ Profile data is encrypted at rest with AES-256-GCM using the server's `DATABASE_
 ├── extension/
 │   ├── agent.js               # Agent session management, profile handling
 │   ├── agentClient.js         # Web agent API client + SSE
-│   ├── background.js          # Extension lifecycle, tab tracking
+│   ├── background.js          # Extension lifecycle, tab tracking, native messaging init
 │   ├── config.js              # Shared config (SERVER_BASE)
+│   ├── serviceManager.js      # Native messaging client (auto-start services)
 │   ├── icons/                 # Extension icons
 │   ├── intent.js              # Intent detection (heuristic + LLM)
 │   ├── llmClient.js           # LLM client (OpenAI + Anthropic) + ReAct functions
@@ -230,7 +263,12 @@ Profile data is encrypted at rest with AES-256-GCM using the server's `DATABASE_
 │   ├── prompts/               # LLM planning prompts
 │   ├── tests/                 # Unit and integration tests
 │   └── README.md              # Web agent documentation
-├── webchat.config.json        # Global configuration (providers, server, agent, extension)
+├── native_host/
+│   ├── service_manager.js     # Native Messaging host (spawns server + crawl as detached processes)
+│   ├── service_manager.bat    # Windows wrapper (Chrome requires an executable)
+│   ├── setup.js               # One-time install/uninstall script (registry + manifest)
+│   └── logs/                  # Runtime logs (service_manager.log, pids.json)
+├── webchat.config.json        # Global configuration (providers, server, agent, extension, nativeHost)
 └── notes/                     # Planning and analysis notes
 ```
 
@@ -243,6 +281,7 @@ Profile data is encrypted at rest with AES-256-GCM using the server's `DATABASE_
 | `providers` | Default provider/model, agent provider/model, intent model, available models per provider |
 | `server` | Port, body size limit, Crawl4AI URL, Brave Search settings, Anthropic max tokens |
 | `agent` | Port pool, timeout, health check settings, max steps, LLM temperature, browser options |
+| `nativeHost` | Host name, health check interval/max attempts, python path |
 | `extension` | ReAct loop limits, search defaults, extraction settings, profile defaults |
 
 `server/config.js` loads this file and exports the values for use across the server. The extension receives its config section via `GET /api/config`.
@@ -358,9 +397,9 @@ See `notes/debugging_notes.md` for curl-based endpoint tests.
 
 ### Smoke Test
 
-1. Start Crawl4AI: `cd crawl_service && python crawl_service.py`
-2. Start server: `cd server && npm start`
-3. Load extension in browser
+1. Start services (either via native messaging auto-start or manually in two terminals)
+2. Load extension in browser
+3. Check for a green status dot in the panel header (if native messaging is set up)
 4. Verify Testing Mode echo works
 5. Send a question about the current page and confirm intent detection routes to simple chat
 6. Ask a research question and verify Brave Search + iterative reasoning via ReAct
@@ -370,3 +409,6 @@ See `notes/debugging_notes.md` for curl-based endpoint tests.
 * **`node_modules/` missing:** Run `npm install` in `./server`
 * **Crawl4AI errors:** Ensure the crawl service is running on port 11235
 * **Extension not updating:** Reload extension at `chrome://extensions` after code changes
+* **Gray status dot:** Native messaging host not registered. Run `node native_host/setup.js --id=<ext-id>` and reload the extension. The extension still works if you start services manually.
+* **Red status dot:** One or both services failed to start. Check `native_host/logs/service_manager.log` for details.
+* **Services still running after panel close:** If the panel crashed or the stop command didn't reach the native host, orphaned processes may remain. Kill them via Task Manager or `taskkill /F /IM node.exe`.

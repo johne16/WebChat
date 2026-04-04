@@ -1,7 +1,14 @@
 // extension/background.js
+import { ensureServices, stopServices, getServiceStatus, onStatusChange } from './serviceManager.js';
+
 const PATH = 'panel.html';
 const openPanels = new Set();
 let activeTabId = null;
+
+// Forward status changes to any open panels
+onStatusChange((status) => {
+	chrome.runtime.sendMessage({ type: 'SERVICE_STATUS', ...status }).catch(() => {});
+});
 
 // initial configuration options
 chrome.runtime.onInstalled.addListener((details) => {
@@ -27,10 +34,30 @@ chrome.windows.onFocusChanged.addListener(async (winId) => {
 });
 
 // background message handling
-chrome.runtime.onMessage.addListener((m) => {
-	// panel open/close status
-	if (m?.type === "PANEL_OPEN" && m.tabId) openPanels.add(m.tabId);
-	if (m?.type === "PANEL_CLOSED" && m.tabId) openPanels.delete(m.tabId);
+chrome.runtime.onMessage.addListener((m, sender, sendResponse) => {
+	console.log('[BG] Message received:', m?.type, m);
+	// service status query from panel
+	if (m?.type === 'GET_SERVICE_STATUS') {
+		sendResponse(getServiceStatus());
+		return;
+	}
+	// panel open: always ensure services (idempotent via health checks)
+	if (m?.type === "PANEL_OPEN" && m.tabId) {
+		openPanels.add(m.tabId);
+		console.log('[BG] Panel opened, tab:', m.tabId, 'panels:', openPanels.size);
+		ensureServices().then(
+			(s) => console.log('[BG] Services started:', s),
+			(e) => console.warn('[BG] Service auto-start unavailable:', e.message)
+		);
+	}
+	// panel close: stop services if this was the last panel
+	if (m?.type === "PANEL_CLOSED" && m.tabId) {
+		openPanels.delete(m.tabId);
+		if (openPanels.size === 0) {
+			stopServices();
+			console.log('[BG] Last panel closed, stopping services');
+		}
+	}
 	// close panel via UI
 	if (m?.type === 'WEBCHAT_CLOSE') {
 		chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
@@ -38,6 +65,10 @@ chrome.runtime.onMessage.addListener((m) => {
 			if (!tabId) return;
 			chrome.sidePanel.setOptions({ tabId, enabled: false });
 			openPanels.delete(tabId);
+			if (openPanels.size === 0) {
+				stopServices();
+				console.log('[BG] Last panel closed (via UI), stopping services');
+			}
 		});
 	}
 });
@@ -49,9 +80,12 @@ function toggleForActiveTab() {
 		if (!tabId) return;
 
 		if (openPanels.has(tabId)) {
-			// chrome.runtime.sendMessage({ type: "WEBCHAT_CLOSE" }, () => void chrome.runtime.lastError);
 			chrome.sidePanel.setOptions({ tabId, enabled: false });
 			openPanels.delete(tabId);
+			if (openPanels.size === 0) {
+				stopServices();
+				console.log('[BG] Last panel closed (via toggle), stopping services');
+			}
 		} else {
 			chrome.sidePanel.setOptions({ tabId, path: PATH, enabled: true });
 			chrome.sidePanel.open({ tabId }); // runs within the user gesture

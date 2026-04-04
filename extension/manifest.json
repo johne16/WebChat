@@ -15,7 +15,8 @@
     "tabs",
     "activeTab",
     "storage",
-    "scripting"
+    "scripting",
+    "nativeMessaging"
   ],
   "background": {
     "service_worker": "background.js",

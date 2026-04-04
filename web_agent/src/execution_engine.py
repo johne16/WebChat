@@ -103,7 +103,7 @@ class ExecutionEngine:
         (re.compile(r'\.innerHTML\s*='), "innerHTML assignment not allowed"),
     ]
 
-    _FUNCTION_CALL_PATTERN = re.compile(r'\b(\w+)\s*\(')
+    _AWAIT_CALL_PATTERN = re.compile(r'await\s+(\w+)\s*\(')
 
     _SUBMIT_CLICK_PATTERN = re.compile(r"await\s+clickButton\s*\(\s*(?:'([^']*)'|\"([^\"]*)\")\s*\)\s*;?")
 
@@ -236,16 +236,12 @@ class ExecutionEngine:
         if len(code) > config.MAX_CODE_LENGTH:
             return False, f"Generated code exceeds maximum length ({config.MAX_CODE_LENGTH} chars)"
 
-        # Extract function calls and verify they're allowed
-        function_calls = self._FUNCTION_CALL_PATTERN.findall(code)
+        # Verify every await call matches a known operation from _OP_PATTERNS
+        known_ops = {op_type for _, op_type in self._OP_PATTERNS}
+        await_calls = self._AWAIT_CALL_PATTERN.findall(code)
 
-        # Allowed functions (API + standard JS)
-        allowed = set(config.ALLOWED_APIS + [
-            'fillForm', 'console', 'log', 'warn', 'error', 'await'
-        ])
-
-        for func in function_calls:
-            if func not in allowed and not func.startswith('_'):
+        for func in await_calls:
+            if func not in known_ops:
                 return False, f"Unauthorized function call: {func}()"
 
         # If all checks pass

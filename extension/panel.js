@@ -23,6 +23,7 @@ import {
 	showThinkingIndicator,
 	removeThinkingIndicator,
 	updateHeaderProgress,
+	updateServiceStatus,
 	renderInputForm,
 	removeCurrentForm,
 	showStickyBanner,
@@ -43,6 +44,19 @@ const bannerContinue = document.getElementById('banner-continue');
 let isTestingMode = false;
 let pendingAgentRequest = null;  // Stores {text, url} when awaiting confirmation
 let lastSeenTimestamp = 0;       // For SSE reconnect deduplication
+
+// Query initial service status from background
+chrome.runtime.sendMessage({ type: 'GET_SERVICE_STATUS' }, (response) => {
+	if (chrome.runtime.lastError) return;
+	if (response) updateServiceStatus(response.server, response.crawl);
+});
+
+// Listen for status updates from background
+chrome.runtime.onMessage.addListener((msg) => {
+	if (msg?.type === 'SERVICE_STATUS') {
+		updateServiceStatus(msg.server, msg.crawl);
+	}
+});
 
 // Load config from server (populates getConfig() for all modules)
 await loadConfig().catch(() => {});

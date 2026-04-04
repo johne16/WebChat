@@ -43,6 +43,34 @@ html, body {
 	border-bottom: 1px solid #2a2d36
 }
 
+.service-status {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: #6b7280;
+	flex-shrink: 0;
+	margin-left: 6px;
+	margin-right: auto;
+	transition: background 0.3s ease;
+}
+
+.service-status.running {
+	background: #22c55e;
+}
+
+.service-status.starting {
+	background: #eab308;
+}
+
+.service-status.error,
+.service-status.stopped {
+	background: #ef4444;
+}
+
+.service-status.unavailable {
+	background: #6b7280;
+}
+
 .header-progress {
 	flex: 1;
 	font-size: 11px;
