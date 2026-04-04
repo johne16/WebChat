@@ -1,6 +1,6 @@
 # Web Agent
 
-An autonomous web agent that uses GPT-5 to execute natural language goals on websites. The agent analyzes pages, decides actions via LLM planning, executes them (form filling, clicking, navigation), and maintains session memory across steps.
+An autonomous web agent that uses LLM planning to execute natural language goals on websites. Supports OpenAI and Anthropic providers. The agent analyzes pages, decides actions, executes them (form filling, clicking, navigation), and maintains session memory across steps.
 
 ## Features
 
