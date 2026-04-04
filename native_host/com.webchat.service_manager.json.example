@@ -1,0 +1,9 @@
+{
+	"name": "com.webchat.service_manager",
+	"description": "WebChat Service Manager",
+	"path": "C:\\path\\to\\WebChat\\native_host\\service_manager.bat",
+	"type": "stdio",
+	"allowed_origins": [
+		"chrome-extension://your-extension-id-here/"
+	]
+}
