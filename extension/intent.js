@@ -98,7 +98,7 @@ async function detectIntentWithLLM(text, currentUrl) {
 
 3. "agent" - Requests to perform actions on websites: sign up, register, fill forms, create accounts, make purchases, log in, submit applications, etc. These require browser automation.
 
-If the intent is "agent", also provide the target URL. If no URL is in the message, infer it from context (e.g., "ABC Power" -> likely "https://www.abcpower.com" or similar).
+If the intent is "agent", also provide the target URL if one is explicitly in the message. If no URL is provided, set url to null. Never infer or guess URLs.
 
 Respond in JSON format:
 {
