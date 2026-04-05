@@ -92,9 +92,9 @@ function extractUrl(text) {
 async function detectIntentWithLLM(text, currentUrl) {
 	const systemPrompt = `You are an intent classifier for a web assistant. Classify user messages into one of three intents:
 
-1. "simple" - Questions about the current page, requests to summarize/explain content, or general questions that can be answered with the current page context.
+1. "simple" - Questions that can be fully answered using only the content visible on the current page. Summarization, explanation, or questions where the current page has the answer.
 
-2. "research" - Questions requiring web search to find information from multiple sources, fact-checking, or finding up-to-date information not on the current page.
+2. "research" - Questions that cannot be fully answered from the current page alone. This includes questions requiring web search, navigating to other pages, following links, or aggregating information from multiple pages -- even within the same website.
 
 3. "agent" - Requests to perform actions on websites: sign up, register, fill forms, create accounts, make purchases, log in, submit applications, etc. These require browser automation.
 

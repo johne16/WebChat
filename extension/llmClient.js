@@ -128,32 +128,9 @@ export async function sendToBot(userText, currentURL) {
 export async function askLLMToThink(context) {
 	const model = cachedModel;
 
-	// Build the thinking prompt
-	const systemPrompt = `You are a research assistant using ReAct. IMPORTANT: Keep all responses concise and focused.
-
-**Output constraints (CRITICAL):**
-- "thought" field: 1-2 sentences maximum
-- "action_input" for answers: 3-4 sentences maximum
-- Be direct, no unnecessary words
-
-**Available actions:**
-1. "search" - Search the web using Brave Search. Provide a search query as action_input.
-2. "fetch_current_page" - Extract content from the current webpage the user is viewing. No action_input needed.
-3. "fetch_url" - Fetch content from a specific URL. Provide the URL as action_input.
-4. "answer" - Provide the final answer to the user. Provide your answer as action_input.
-
-**Instructions:**
-- Think step by step about what you know and what you need to find out
-- Choose the most appropriate action
-- If you have enough information, choose "answer"
-- If you cannot find the answer after multiple attempts, choose "answer" and explain what you could not find
-
-Respond ONLY with valid JSON in this exact format (no markdown, no extra text):
-{
-  "thought": "your reasoning about what to do next",
-  "action": "search|fetch_current_page|fetch_url|answer",
-  "action_input": "search query, URL, or your final answer"
-}`;
+	// Load thinking prompt from file
+	const promptUrl = chrome.runtime.getURL('prompts/react_think.txt');
+	const systemPrompt = await fetch(promptUrl).then(r => r.text());
 
 	const userPrompt = buildContextPrompt(context);
 
