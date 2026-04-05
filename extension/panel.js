@@ -55,11 +55,9 @@ chrome.runtime.sendMessage({ type: 'GET_SERVICE_STATUS' }, (response) => {
 chrome.runtime.onMessage.addListener((msg) => {
 	if (msg?.type === 'SERVICE_STATUS') {
 		updateServiceStatus(msg.server, msg.crawl);
+		if (msg.server) loadConfig().catch(() => {});
 	}
 });
-
-// Load config from server (populates getConfig() for all modules)
-await loadConfig().catch(() => {});
 
 // Read agent max steps from server config (used for progress bar denominator)
 function getMaxAgentSteps() { return getConfig()?.agent?.maxSteps || 20; }
@@ -372,7 +370,7 @@ async function handleAgentIntent(text, url, intentResult) {
 
 	// Ask for confirmation
 	const confidence = intentResult.confidence === 'high' ? '' : ' (I think)';
-	addMessage('bot', `This looks like a task for the web agent${confidence}. I'll open a browser and work on: "${text}" at ${url}. Should I proceed?`);
+	addMessage('bot', `This looks like a task for the web agent${confidence}. Should I proceed?`);
 	pendingAgentRequest = { text, url };
 }
 

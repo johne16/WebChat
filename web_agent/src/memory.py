@@ -55,6 +55,7 @@ class SessionMemory:
         self._visited_urls: List[str] = []
         self._user_profile: Dict[str, Any] = {}
         self._missing_fields: List[str] = []
+        self._resumed_from: Optional[str] = None
 
         # Track the session_id passed to constructor for async init
         self._init_session_id = session_id
@@ -360,10 +361,15 @@ class SessionMemory:
         """
         sections = [
             "## Session Memory",
+            f"Session Status: {self.status}",
+        ]
+        if self._resumed_from:
+            sections.append(f"Resumed From: {self._resumed_from}")
+        sections.extend([
             f"Entered Data: {json.dumps(self._entered_data)}",
             f"Visited URLs: {json.dumps(self._visited_urls)}",
             f"Current Step: {self.current_step}",
-        ]
+        ])
 
         recent_actions = [
             {
@@ -454,3 +460,16 @@ class SessionMemory:
             fields: List of field names the agent needs
         """
         self._missing_fields = fields.copy()
+
+    @property
+    def resumed_from(self) -> Optional[str]:
+        """Get the status the session was resumed from"""
+        return self._resumed_from
+
+    def set_resumed_from(self, status: str) -> None:
+        """Record which status the session was resumed from
+
+        Args:
+            status: Previous status before resume (e.g., awaiting_user_action, needs_input)
+        """
+        self._resumed_from = status

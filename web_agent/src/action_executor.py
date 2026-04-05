@@ -6,7 +6,6 @@ from typing import Dict, Any, Optional, Callable, Awaitable
 from src.browser import BrowserManager
 from src.execution_engine import ExecutionEngine
 from src.memory import SessionMemory
-from src.llm import LLMClient
 from src.config import config
 
 
@@ -30,8 +29,7 @@ class ActionExecutor:
         self,
         browser: BrowserManager,
         execution_engine: ExecutionEngine,
-        memory: SessionMemory,
-        llm: LLMClient
+        memory: SessionMemory
     ):
         """Initialize action executor
 
@@ -39,12 +37,10 @@ class ActionExecutor:
             browser: BrowserManager instance
             execution_engine: ExecutionEngine for form filling
             memory: SessionMemory for storing entered data
-            llm: LLMClient for generating form fill code
         """
         self.browser = browser
         self.engine = execution_engine
         self.memory = memory
-        self.llm = llm
 
         # Action registry - maps action names to handlers
         self._actions: Dict[str, Callable[..., Awaitable[ActionResult]]] = {
@@ -101,114 +97,90 @@ class ActionExecutor:
         self,
         params: Dict[str, Any]
     ) -> ActionResult:
-        """Fill and optionally submit a form
+        """Fill form fields and optionally submit
 
         Args:
-            params: {"submit": bool}
+            params: {
+                "fields": [{"selector": str, "value": str, "type": str, "name": str}, ...],
+                "submit": "CSS selector" or null
+            }
 
         Returns:
             ActionResult
         """
-        # Get form HTML
-        form_html = await self.browser.get_form_elements()
+        fields = params.get("fields", [])
+        submit_selector = params.get("submit")
 
-        if form_html is None:
+        if not fields:
             return ActionResult(
                 success=False,
                 action_type="fill_form",
                 details={},
-                error={"type": "no_forms", "message": "No forms found on page", "details": {}}
+                error={"type": "no_fields", "message": "No fields provided in params", "details": {}}
             )
 
-        # Merge memory data with user profile (memory takes precedence for reuse)
-        user_profile = self.memory.user_profile
-        merged_profile = user_profile.copy()
-        for key, value in self.memory.entered_data.items():
-            if key not in merged_profile:
-                merged_profile[key] = value
+        filled = []
+        try:
+            for field in fields:
+                field_type = field.get("type", "text")
+                selector = field.get("selector")
+                value = field.get("value")
+                name = field.get("name")
 
-        # Generate fill code
-        llm_result = await self.llm.generate_fill_code(form_html, merged_profile)
+                if field_type == "select":
+                    await self.engine._select_option(selector, str(value))
+                elif field_type == "radio":
+                    await self.engine._select_radio(name, str(value))
+                elif field_type == "checkbox":
+                    await self.engine._check_checkbox(selector, bool(value))
+                else:
+                    await self.engine._fill_field(selector, str(value))
 
-        # Validate code
-        is_valid, error = self.engine.validate_code(llm_result["code"])
-        if not is_valid:
+                filled.append({"selector": selector or name, "type": field_type})
+
+                # Store in memory for reuse
+                key = selector or name or ""
+                key = key.lstrip("#").replace("[name=\"", "").rstrip("\"]")
+                if value:
+                    self.memory.remember(key, str(value))
+
+        except Exception as e:
             return ActionResult(
                 success=False,
                 action_type="fill_form",
-                details={"code": llm_result["code"]},
-                error={"type": "validation_error", "message": f"Validation failed: {error}", "details": {}}
+                details={"fields_filled": len(filled)},
+                error={"type": "fill_error", "message": str(e), "details": {}}
             )
 
-        # Extract submit button if submitting
-        submit = params.get("submit", True)
-        if submit:
-            form_fill_code, submit_selector = self.engine.extract_submit_click(llm_result["code"])
-        else:
-            form_fill_code = llm_result["code"]
-            submit_selector = None
-
-        # Execute form filling
-        exec_result = await self.engine.execute(form_fill_code)
-
-        if not exec_result["success"]:
-            return ActionResult(
-                success=False,
-                action_type="fill_form",
-                details=exec_result,
-                error=exec_result["error"]
-            )
-
-        # Store entered data in memory for reuse
-        self._store_entered_data(merged_profile)
-
-        # Handle submit if requested
+        # Handle submit
         navigated = False
         new_url = None
         nav_wait = 0.0
 
-        if submit and submit_selector:
+        if submit_selector:
             current_url = self.browser.page.url
 
             try:
-                # Wait for navigation and click submit
                 nav_t0 = time.perf_counter()
                 async with self.browser.page.expect_navigation(timeout=config.NAVIGATION_TIMEOUT):
-                    await self.browser.page.click(submit_selector)
+                    await self.engine._click_button(submit_selector)
                 nav_wait = time.perf_counter() - nav_t0
                 navigated = True
                 new_url = self.browser.page.url
-
             except Exception:
-                # Submit might not navigate (e.g., validation error on page)
                 nav_wait = time.perf_counter() - nav_t0
 
         return ActionResult(
             success=True,
             action_type="fill_form",
             details={
-                "fields_filled": len(exec_result.get("steps", [])),
-                "submitted": submit and submit_selector is not None
+                "fields_filled": len(filled),
+                "submitted": submit_selector is not None
             },
             navigated=navigated,
             new_url=new_url,
             navigation_wait_time=nav_wait
         )
-
-    def _store_entered_data(self, profile: Dict[str, Any]) -> None:
-        """Store profile data in memory for reuse
-
-        Args:
-            profile: User profile data that was used
-        """
-        # Store all non-empty profile fields for reuse
-        for field, value in profile.items():
-            if field == "address" and isinstance(value, dict):
-                for key, addr_value in value.items():
-                    if addr_value:
-                        self.memory.remember(f"address_{key}", addr_value)
-            elif value:
-                self.memory.remember(field, value)
 
     async def _execute_click(
         self,

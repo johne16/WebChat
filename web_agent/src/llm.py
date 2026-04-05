@@ -1,4 +1,4 @@
-"""LLM client for generating form-filling JavaScript code and planning"""
+"""LLM client for agent planning"""
 
 import json
 import logging
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class LLMClient:
-    """Handles LLM API communication for code generation and planning.
+    """Handles LLM API communication for agent planning.
 
     Supports OpenAI and Anthropic providers.
     """
@@ -44,20 +44,7 @@ class LLMClient:
         else:
             self.client = AsyncOpenAI(api_key=api_key)
 
-        self.system_prompt = self._load_system_prompt()
         self.planning_prompt = self._load_planning_prompt()
-        self.examples = self._load_examples()
-
-    def _load_system_prompt(self) -> str:
-        """Load system prompt from file"""
-        prompt_file = Path(__file__).parent.parent / "prompts" / "system_prompt.txt"
-        try:
-            return prompt_file.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            raise FileNotFoundError(
-                f"System prompt file not found: {prompt_file}. "
-                "Please create prompts/system_prompt.txt"
-            )
 
     def _load_planning_prompt(self) -> str:
         """Load planning prompt from file"""
@@ -70,14 +57,6 @@ class LLMClient:
                 "Please create prompts/planning_prompt.txt"
             )
 
-    def _load_examples(self) -> List[Dict[str, Any]]:
-        """Load few-shot examples from file"""
-        examples_file = Path(__file__).parent.parent / "prompts" / "examples.json"
-        try:
-            return json.loads(examples_file.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            # Examples are optional
-            return []
 
     async def _call_llm(
         self,
@@ -174,43 +153,6 @@ class LLMClient:
             "model": self.model,
             "finish_reason": response.stop_reason
         }
-
-    async def generate_fill_code(
-        self,
-        form_html: str,
-        user_profile: Dict[str, Any],
-        error_context: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Generate JavaScript code to fill form
-
-        Args:
-            form_html: Preprocessed form structure
-            user_profile: User data to fill
-            error_context: Previous error message (if retrying)
-
-        Returns:
-            {
-                "code": str,
-                "tokens_used": int,
-                "model": str,
-                "reasoning": str | None
-            }
-        """
-        messages = self._build_prompt(form_html, user_profile, error_context)
-
-        try:
-            result = await self._call_llm(messages, max_tokens=2000)
-            code = self._extract_code(result["content"])
-
-            return {
-                "code": code,
-                "tokens_used": result["tokens_used"],
-                "model": result["model"],
-                "reasoning": None
-            }
-
-        except Exception as e:
-            raise RuntimeError(f"LLM API error: {str(e)}") from e
 
     async def generate_plan(
         self,
@@ -336,62 +278,3 @@ class LLMClient:
                 "missing_fields": []
             }
 
-    def _build_prompt(
-        self,
-        form_html: str,
-        user_profile: Dict[str, Any],
-        error_context: Optional[str] = None
-    ) -> List[Dict[str, str]]:
-        """Construct messages array for LLM API"""
-        messages = [
-            {"role": "system", "content": self.system_prompt}
-        ]
-
-        # Add few-shot examples
-        for example in self.examples:
-            user_msg = f"Form HTML:\n{example['form_html']}\n\nUser Profile:\n{json.dumps(example['user_profile'], indent=2)}"
-            messages.append({"role": "user", "content": user_msg})
-            messages.append({"role": "assistant", "content": example['generated_code']})
-
-        # Add current form + profile
-        user_msg = f"Form HTML:\n{form_html}\n\nUser Profile:\n{json.dumps(user_profile, indent=2)}"
-        messages.append({"role": "user", "content": user_msg})
-
-        # If retrying with error feedback
-        if error_context:
-            retry_msg = (
-                f"Previous attempt failed with error:\n{error_context}\n\n"
-                "Please review the form structure and fix the code."
-            )
-            messages.append({"role": "user", "content": retry_msg})
-
-        return messages
-
-    def _extract_code(self, response: str) -> str:
-        """Extract JavaScript code from response"""
-        # Try to extract from markdown code block
-        code_block_match = re.search(
-            r'```(?:javascript|js)?\s*\n(.*?)\n```',
-            response,
-            re.DOTALL
-        )
-
-        if code_block_match:
-            return code_block_match.group(1).strip()
-
-        # If no code block, check if response starts with 'async function'
-        if response.strip().startswith('async function'):
-            return response.strip()
-
-        # If code is mixed with text, try to extract the function
-        function_match = re.search(
-            r'(async function fillForm\(\).*?\n})',
-            response,
-            re.DOTALL
-        )
-
-        if function_match:
-            return function_match.group(1).strip()
-
-        # If all else fails, return the full response (validation will catch errors)
-        return response.strip()

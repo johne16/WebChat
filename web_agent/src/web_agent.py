@@ -187,15 +187,17 @@ class AutonomousWebAgent:
 
         # Store goal and user profile in memory
         self.memory.goal = goal
-        self.memory.status = GoalStatus.IN_PROGRESS
 
-        # Store or merge user profile; detect resume to suppress duplicate "Starting goal" message
+        # Detect resume and capture previous status before resetting
         is_resume = bool(self.memory.user_profile)
         if is_resume:
+            self.memory.set_resumed_from(self.memory.status)
             self.memory.update_user_profile(user_profile)
         else:
             self.memory.set_user_profile(user_profile)
             await self._send_webhook(GoalStatus.STARTED, f"Starting goal: {goal[:100]}")
+
+        self.memory.status = GoalStatus.IN_PROGRESS
 
         try:
             # Launch browser
@@ -206,8 +208,7 @@ class AutonomousWebAgent:
             self.action_executor = ActionExecutor(
                 self.browser,
                 self.execution_engine,
-                self.memory,
-                self.llm
+                self.memory
             )
 
             # Navigate to start URL only for new sessions
@@ -290,17 +291,24 @@ class AutonomousWebAgent:
                     logger.debug(f"[AGENT] Reasoning: {plan['reasoning']}")
                     logger.debug(f"[AGENT] Goal status: {plan['goal_status']}")
 
-                # 3. Check if goal achieved or blocked
-                terminal_response = await self._check_goal_status(plan, errors)
-                if terminal_response is not None:
-                    return terminal_response
+                # 3. If action is "none", check goal status before execution
+                if plan["action"] == "none":
+                    terminal_response = await self._check_goal_status(plan, errors)
+                    if terminal_response is not None:
+                        return terminal_response
 
                 # 4. Execute action and record in memory
                 consecutive_failures, should_abort, result = await self._execute_and_record_step(
                     step, plan, errors, consecutive_failures
                 )
 
-                # 5. Collect per-step metrics
+                # 5. Check goal status after execution
+                if plan["action"] != "none":
+                    terminal_response = await self._check_goal_status(plan, errors)
+                    if terminal_response is not None:
+                        return terminal_response
+
+                # 6. Collect per-step metrics
                 step_total_time = time.perf_counter() - step_start
 
                 step_metric = {
@@ -326,7 +334,7 @@ class AutonomousWebAgent:
                 self._step_metrics.append(step_metric)
                 self._metrics.log_step({k: v for k, v in step_metric.items() if k != "_params"})
 
-                # 6. Update wasted step counters
+                # 7. Update wasted step counters
                 if not result.success:
                     self._wasted_failures += 1
                 if prev_action == plan["action"] and prev_params == plan["params"]:
